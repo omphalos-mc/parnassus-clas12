@@ -1,0 +1,14 @@
+[project]
+authors = [{name = "Dmitrii Kobylianskii", email = "kobad2@gmail.com"}]
+description = "Core library for Parnassus, a Python package for high-performance fast simulation framework for particle physics."
+license = { text = "MIT" }
+readme = "README.md"
+name = "parnassus_core"
+requires-python = ">= 3.11"
+version = "0.1.0"
+dependencies = [
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
