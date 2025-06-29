@@ -203,7 +203,7 @@ class PerformanceLogger(Callback):
         var_idx = 0
         for var in self.ctxt_vars:
             var_name = var.replace("truth_", "")
-            if var_name.endswith("_phi") and self.sin_cos:
+            if var_name.endswith("phi") and self.sin_cos:
                 ctxt_ = torch.atan2(
                     data_dict["ctxt_data"][..., var_idx],
                     data_dict["ctxt_data"][..., var_idx + 1],
@@ -216,8 +216,8 @@ class PerformanceLogger(Callback):
                 ctxt_ = self.feature_scaler[var_name].inverse_transform(
                     data_dict["ctxt_data"][..., var_idx]
                 )
+                var_idx += 1
             new_data_dict[f"tr_{var_name}"] = ctxt_.numpy()
-            var_idx += 1
         var_idx = 0
         for var in self.fs_vars:
             var_name = var.replace("pflow_", "")
