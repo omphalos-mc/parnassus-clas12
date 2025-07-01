@@ -3,6 +3,27 @@ import torch as T
 import torch.nn as nn
 
 
+class Base2FourierFeatures(nn.Module):
+    def __init__(self, start=0, stop=8, step=1):
+        super().__init__()
+        self.start = start
+        self.stop = stop
+        self.step = step
+        self.freqs_exp = T.arange(start, stop, step, dtype=T.float32)
+
+    def forward(self, inputs):
+        # Create Base 2 Fourier features
+        freqs_exp = self.freqs_exp.to(inputs.device, dtype=inputs.dtype)
+        freqs = 2.0**freqs_exp * 2 * T.pi
+        freqs = freqs.view(
+            -1, *[1] * (inputs.ndim - 1)
+        )  # Reshape to match inputs shape
+        # Compute features
+        features = inputs.unsqueeze(1) * freqs  # Broadcasting multiplication
+        features = features.transpose(1, 2).flatten(-2, -1)
+        return T.cat([T.sin(features), T.cos(features)], dim=-1)
+
+
 class PositionalEmbedding(nn.Module):
     def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
         super().__init__()

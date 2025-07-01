@@ -52,6 +52,7 @@ VARIABLES_LABELS = {
     "ht": "$H_T$",
     "met_x": "$MET_x$",
     "met_y": "$MET_y$",
+    "npart": "$N_{part}$",
     "ptrel": "$p_{T, rel}$",
     "pt": "$p_T$",
     "eta": "$\\eta$",
@@ -59,6 +60,12 @@ VARIABLES_LABELS = {
     "vx": "$v_x$",
     "vy": "$v_y$",
     "vz": "$v_z$",
+    "d0": "$d_0$",
+    "z0": "$z_0$",
+    "d0Error": "$\sigma_{d_0}$",
+    "z0Error": "$\sigma_{z_0}$",
+    "d0Sig": "$d_0 / \sigma_{d_0}$",
+    "z0Sig": "$z_0 / \sigma_{z_0}$",
 }
 
 
@@ -186,8 +193,8 @@ class PerformanceLogger(Callback):
     def unscale_variables(self, data_dict):
         new_data_dict = {}
         for i, var in enumerate(self.ctxt_global_vars):
-            if var.startswith("truth_"):
-                var = var.replace("truth_", "")
+            if var.startswith("truth_") or var.startswith("ntruth"):
+                var = var.replace("truth_", "").replace("ntruth", "npart")
                 new_data_dict[f"tr_{var}"] = (
                     self.feature_scaler[var]
                     .inverse_transform(data_dict["ctxt_global_data"][..., i])
@@ -202,6 +209,8 @@ class PerformanceLogger(Callback):
                 )
         var_idx = 0
         for var in self.ctxt_vars:
+            if var.startswith("pflow_"):
+                continue
             var_name = var.replace("truth_", "")
             if var_name.endswith("phi") and self.sin_cos:
                 ctxt_ = torch.atan2(
@@ -220,7 +229,7 @@ class PerformanceLogger(Callback):
             new_data_dict[f"tr_{var_name}"] = ctxt_.numpy()
         var_idx = 0
         for var in self.fs_vars:
-            var_name = var.replace("pflow_", "")
+            var_name = var.replace("pflow_", "").replace("npflow", "npart")
             if var.endswith("phi") and self.sin_cos:
                 fs_ = torch.atan2(
                     data_dict["fs_data"][..., var_idx],
@@ -400,4 +409,199 @@ class ParticlePerformanceLogger(PerformanceLogger):
             "ht": np.mean((fs_ht - pf_ht) ** 2),
             "met_x": np.mean((fs_met_x - pf_met_x) ** 2),
             "met_y": np.mean((fs_met_y - pf_met_y) ** 2),
+        }
+
+
+class EventPerformanceLogger(PerformanceLogger):
+    def plot_data(self, pl_module, plot_dict):
+        fig, axs = subplots_with_absolute_sized_axes(
+            4, 2, figsize=(18, 18), axis_width=8, axis_height=4, dpi=200
+        )
+        canvas = FigureCanvas(fig)
+
+        cmap = copy.copy(plt.get_cmap("PuRd"))
+        cmap.set_under("white")
+
+        bins = {
+            "ht": np.linspace(0, 3000, 100),
+            "met_x": np.linspace(-100, 100, 100),
+            "met_y": np.linspace(-100, 100, 100),
+            "npart": np.linspace(0.5, 400.5, 100),
+        }
+        res_bins = {
+            "ht": np.linspace(-2, 1, 50),
+            "npart": np.linspace(-250, 150, 50),
+            "met_x": np.linspace(-100, 100, 50),
+            "met_y": np.linspace(-100, 100, 50),
+        }
+        for i, var in enumerate(["ht", "met_x", "met_y", "npart"]):
+            _add_to_hist(
+                axs[i][0],
+                plot_dict[f"pf_{var}"],
+                bins=bins[var],
+                label=f"PF",
+                histtype="stepfilled",
+            )
+            _add_to_hist(
+                axs[i][0],
+                plot_dict[f"fs_{var}"],
+                bins=bins[var],
+                label=f"FS",
+                histtype="step",
+            )
+            _add_to_hist(
+                axs[i][0],
+                plot_dict[f"tr_{var}"],
+                bins=bins[var],
+                label=f"TR",
+                histtype="step",
+                color="k",
+            )
+            axs[i][0].set_title(f"{VARIABLES_LABELS[var]}")
+            axs[i][0].legend()
+
+            pf_res = (
+                (plot_dict[f"pf_{var}"] - plot_dict[f"tr_{var}"])
+                / plot_dict[f"pf_{var}"]
+                if i == 0
+                else plot_dict[f"pf_{var}"] - plot_dict[f"tr_{var}"]
+            )
+            fs_res = (
+                (plot_dict[f"fs_{var}"] - plot_dict[f"tr_{var}"])
+                / plot_dict[f"fs_{var}"]
+                if i == 0
+                else plot_dict[f"fs_{var}"] - plot_dict[f"tr_{var}"]
+            )
+            _add_to_hist(
+                axs[i][1],
+                pf_res,
+                bins=res_bins[var],
+                label=f"PF-TR",
+                histtype="stepfilled",
+            )
+            _add_to_hist(
+                axs[i][1], fs_res, bins=res_bins[var], label=f"FS-TR", histtype="step"
+            )
+            axs[i][1].set_title(f"{VARIABLES_LABELS[var]} Residuals")
+            axs[i][1].legend()
+
+        canvas.draw()
+        w, h = fig.get_size_inches() * fig.get_dpi()
+        image = np.fromstring(canvas.tostring_rgb(), dtype="uint8").reshape(
+            int(h), int(w), 3
+        )
+        fig.subplots_adjust(hspace=0.3, wspace=0.3)
+        plt.savefig(f"ED_{pl_module.current_epoch}.png")
+        if pl_module.logger is not None:
+            pl_module.logger.experiment.log_image(
+                image_data=image,
+                name=f"ED_{pl_module.current_epoch}",
+                overwrite=False,
+                image_format="png",
+            )
+        else:
+            plt.savefig(f"ED_{pl_module.current_epoch}.png")
+        plt.close(fig)
+        return {
+            var: np.mean((plot_dict[f"fs_{var}"] - plot_dict[f"pf_{var}"]) ** 2)
+            for var in ["ht", "met_x", "met_y", "npart"]
+        }
+
+
+class ImpactPerformanceLogger(PerformanceLogger):
+    def plot_data(self, pl_module, plot_dict):
+        fig, axs = subplots_with_absolute_sized_axes(
+            2, 3, figsize=(20, 10), axis_width=6, axis_height=4, dpi=200
+        )
+        axs = axs.flatten()
+        canvas = FigureCanvas(fig)
+
+        cmap = copy.copy(plt.get_cmap("PuRd"))
+        cmap.set_under("white")
+
+        bins_dict = {
+            "d0": np.linspace(-0.5, 0.5, 50),
+            "d0Error": np.linspace(0, 1, 50),
+            "d0Sig": np.linspace(-2, 2, 50),
+            "z0": np.linspace(-0.5, 0.5, 50),
+            "z0Error": np.linspace(0, 2, 50),
+            "z0Sig": np.linspace(-2, 2, 50),
+        }
+
+        pf_mask = plot_dict["fs_mask"].astype(bool)
+        for key, val in plot_dict.items():
+            if (
+                (key.startswith("pf_") or key.startswith("fs_"))
+                and key != "fs_mask"
+                and val.ndim == 2
+            ):
+                plot_dict[key] = val[pf_mask]
+        for i, var in enumerate(bins_dict.keys()):
+            if f"pf_{var}" not in plot_dict:
+                if var in {"d0", "z0"}:
+                    plot_dict[f"pf_{var}"] = (
+                        plot_dict[f"pf_{var}Sig"] * plot_dict[f"pf_{var}Error"]
+                    )
+                    plot_dict[f"fs_{var}"] = (
+                        plot_dict[f"fs_{var}Sig"] * plot_dict[f"fs_{var}Error"]
+                    )
+                elif var in {"d0Error", "z0Error"}:
+                    var_ = var.replace("Error", "")
+                    plot_dict[f"pf_{var}"] = (
+                        plot_dict[f"pf_{var_}"] / plot_dict[f"pf_{var_}Sig"]
+                    )
+                    plot_dict[f"fs_{var}"] = (
+                        plot_dict[f"fs_{var_}"] / plot_dict[f"fs_{var_}Sig"]
+                    )
+                elif var in {"d0Sig", "z0Sig"}:
+                    var_ = var.replace("Sig", "")
+                    plot_dict[f"pf_{var}"] = (
+                        plot_dict[f"pf_{var_}"] / plot_dict[f"pf_{var_}Error"]
+                    )
+                    plot_dict[f"fs_{var}"] = (
+                        plot_dict[f"fs_{var_}"] / plot_dict[f"fs_{var_}Error"]
+                    )
+            _add_to_hist(
+                axs[i],
+                plot_dict[f"pf_{var}"],
+                bins=bins_dict[var],
+                label="PF",
+                histtype="stepfilled",
+                color="blue",
+                alpha=0.5,
+            )
+            _add_to_hist(
+                axs[i],
+                plot_dict[f"fs_{var}"],
+                bins=bins_dict[var],
+                label="FS",
+                histtype="step",
+                color="red",
+            )
+            axs[i].set_xlabel(VARIABLES_LABELS[var])
+            axs[i].set_ylabel("Counts")
+            axs[i].legend()
+            axs[i].set_yscale("log")
+            axs[i].set_title(var)
+        canvas.draw()
+        w, h = fig.get_size_inches() * fig.get_dpi()
+        image = np.fromstring(canvas.tostring_rgb(), dtype="uint8").reshape(
+            int(h), int(w), 3
+        )
+        fig.subplots_adjust(hspace=0.3, wspace=0.3)
+        plt.savefig(f"ED_{pl_module.current_epoch}.png")
+        if pl_module.logger is not None:
+            pl_module.logger.experiment.log_image(
+                image_data=image,
+                name=f"ED_{pl_module.current_epoch}",
+                overwrite=False,
+                image_format="png",
+            )
+        else:
+            plt.savefig(f"ED_{pl_module.current_epoch}.png")
+        plt.close(fig)
+        return {
+            var: np.mean((plot_dict[f"fs_{var}"] - plot_dict[f"pf_{var}"]) ** 2)
+            for var in ["d0", "d0Error", "d0Sig", "z0", "z0Error", "z0Sig"]
+            if f"fs_{var}" in plot_dict
         }

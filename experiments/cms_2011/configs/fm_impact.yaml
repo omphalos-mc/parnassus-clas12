@@ -1,0 +1,98 @@
+name: rcfm_cms_pow_fevt_MSEDir_Mean_Impact
+model_type: impact_network
+flow_type: rcfm
+sigma: 0
+loss_type: mse_and_direction
+sampler_type: dpm
+n_steps: 10
+
+num_epochs: 100
+
+opt: lion
+optimizer_kwargs:
+    weight_decay: 0.01
+    lr: 1e-5
+
+lr_scheduler: false
+lr_scheduler_dict:
+    gamma: 0.5
+
+use_swa: true
+use_ema: false
+ema_decay: 0.999
+check_val_every_n_epoch: 1
+gradient_clip_val: 1.0
+
+data:
+  num_workers: 6
+
+  train_batch_size: 128
+  valid_batch_size: 2000
+
+  max_particles: 400
+  fs_mask_type: charged
+  zero_neutral_vtx: true
+  sin_cos: true
+
+  num_train: 2_800_000
+  num_valid: 35000
+
+  entry_start_train: 0
+  entry_start_valid: 2_800_000
+  entry_start_test: 0
+
+  train_path: /storage/agrp/dmitrykl/fastsim/f_delphes/data/full_event/output_impact/QCD_Pt-470to600_TTbar_Merged/merged_train_v2_pt025_eta27_ghost.root
+  valid_path: /storage/agrp/dmitrykl/fastsim/f_delphes/data/full_event/output_impact/QCD_Pt-470to600_TTbar_Merged/merged_train_v2_pt025_eta27_ghost.root
+  test_path: /storage/agrp/dmitrykl/fastsim/f_delphes/data/full_event/output_impact/QCD_Pt-600to800_TuneZ2_7TeV_pythia6/merged_test_small_v2_pt025_eta27_ghost.root
+
+  scale_dict_path: /srv01/agrp/dmitrykl/projects/parnassus-dev/experiments/cms_2011/configs/var_transform.yaml
+
+  variables: !include impact_vars.yaml
+
+
+model:
+    time_embedding:
+        hidden_dim: &dim 128
+        time_factor: 1000
+    
+    fs_init_net:
+        input_dim: 4
+        hidden_dim: &dim2 256
+        output_dim: *dim
+        act_h: &act SiLU
+
+    ctxt_networks:
+        # - input_name: ctxt
+        #   fields: ['data']
+        #   dense_kwargs:
+        #     input_dim: 12
+        #     hidden_dim: *dim
+        #     output_dim: *dim
+        #     act_h: *act
+        - input_name: ctxt_global
+          fields: ['data']
+          dense_kwargs:
+            input_dim: 14
+            hidden_dim: *dim2
+            output_dim: *dim
+            act_h: *act
+    
+    global_embedding:
+        input_names: ['ctxt_global', 'time']
+
+    resnet:
+        num_layers: 4
+        net_kwargs:
+            input_dim: *dim
+            output_dim: *dim
+            n_layers: 3
+            do_res: True
+            layer_scale: True
+            pre_norm: LayerNorm
+            act: *act
+
+    fs_out_net:
+        input_dim: *dim
+        hidden_dim: *dim2
+        output_dim: 4
+        act_h: *act

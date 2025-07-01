@@ -20,9 +20,10 @@ from typing import Any, Dict, Iterable, Optional
 import lightning.pytorch as pl
 import torch
 from lightning.pytorch import Callback
-from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
+
+from .checkpoint import Checkpoint
 
 
 class EMA(Callback):
@@ -395,7 +396,7 @@ class EMAOptimizer(torch.optim.Optimizer):
         self.rebuild_ema_params = True
 
 
-class EMAModelCheckpoint(ModelCheckpoint):
+class EMAModelCheckpoint(Checkpoint):
     """
     Light wrapper around Lightning's `ModelCheckpoint` to, upon request, save an EMA copy of the model as well.
 

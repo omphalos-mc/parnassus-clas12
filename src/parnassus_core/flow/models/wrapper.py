@@ -7,6 +7,8 @@ from scipy.stats import norm
 from parnassus_core.flow.utils.loss import MSELoss, MSEAndDirectionLoss, Set2SetLoss
 from parnassus_core.flow.utils.scheduler import CosineAnnealingWarmupRestarts
 from parnassus_core.flow.models.part_net import ParticleNetwork
+from parnassus_core.flow.models.evt_net import EventNetwork
+from parnassus_core.flow.models.imp_net import ImpactNetwork
 from parnassus_core.flow.modules.optimizer import Lion, Muon
 from parnassus_core.flow.sampling import DPM_Solver, NoiseScheduleFlow, EulerSampler
 from parnassus_core.flow.utils.conditional_flow_matcher import (
@@ -39,6 +41,14 @@ class FlowLightning(LightningModule):
             self.net = ParticleNetwork(config["model"])
             self.prediction_loss = Set2SetLoss()
             self.time_shape = (-1, 1, 1)  # (batch_size, 1, 1)
+        elif self.model_type == "event_network":
+            self.net = EventNetwork(config["model"])
+            self.prediction_loss = MSELoss()
+            self.time_shape = (-1, 1)
+        elif self.model_type == "impact_network":
+            self.net = ImpactNetwork(config["model"])
+            self.prediction_loss = MSELoss()
+            self.time_shape = (-1, 1, 1)
         self.flow_type = config["flow_type"]
         self.loss_type = config["loss_type"]
         self.sampler_type = config["sampler_type"]
@@ -102,7 +112,7 @@ class FlowLightning(LightningModule):
 
     def forward(self, data):
         pf_data, ctxt_dict = data
-        pf_mask = ctxt_dict["fs_mask"]
+        pf_mask = ctxt_dict["fs_mask"] if self.model_type != "event_network" else None
         x0 = torch.randn_like(pf_data)
         if self.time_pow:
             t = torch.FloatTensor(np.random.power(3, size=pf_data.shape[0])).to(
@@ -137,7 +147,7 @@ class FlowLightning(LightningModule):
         if self.sampler_type == "euler":
             return self.sampler.sample(
                 self.net,
-                fs_shape=fs_shape,
+                pflow_shape=fs_shape,
                 ctxt_dict=ctxt_dict,
             )
         elif self.sampler_type == "dpm":

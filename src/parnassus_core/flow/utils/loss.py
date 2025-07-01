@@ -23,6 +23,11 @@ class MSELoss(torch.nn.Module):
             pred = pred * mask.unsqueeze(-1)
             target = target * mask.unsqueeze(-1)
         mse_loss = F.mse_loss(pred, target, reduction="sum")
+        if mask is None:
+            return mse_loss / sum(pred.shape)
+        # If mask is provided, normalize by the number of valid elements
+        # and the number of features in the last dimension
+        # (e.g., pt, eta, phi)
         return mse_loss / mask.sum() / pred.shape[-1]
 
 
@@ -36,7 +41,11 @@ class MSEAndDirectionLoss(torch.nn.Module):
         assert cosine_sim_dim > 0, "cannot be batch dimension"
         self.cosine_sim_dim = cosine_sim_dim
 
-    def forward(self, pred, target, mask=None):
+    def forward(
+        self, pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | None = None
+    ):
+        if pred.dim() == 2 and self.cosine_sim_dim == 2:
+            self.cosine_sim_dim = 1
         if mask is not None:
             pred = pred * mask.unsqueeze(-1)
             target = target * mask.unsqueeze(-1)
@@ -45,7 +54,10 @@ class MSEAndDirectionLoss(torch.nn.Module):
             1.0 - F.cosine_similarity(pred, target, dim=self.cosine_sim_dim)
         ).sum()
         loss = mse_loss + direction_loss
-        return loss / mask.sum() / pred.shape[-1]
+        if mask is not None:
+            return loss / mask.sum() / pred.shape[-1]
+        else:
+            return loss / sum(pred.shape)
 
 
 class Set2SetLoss(nn.Module):

@@ -1,0 +1,34 @@
+truth_vars_to_load:
+  - truth_pt
+  - truth_eta
+  - truth_phi
+  - truth_vx
+  - truth_vy
+  - truth_vz
+  - truth_class
+
+pflow_vars_to_load:
+  - pflow_pt
+  - pflow_eta
+  - pflow_phi
+
+fs_vars:
+  - pflow_ht
+  - pflow_met_x
+  - pflow_met_y
+  - npflow
+
+ctxt_vars:
+  - truth_ptrel
+  - truth_eta
+  - truth_phi
+  - truth_vx
+  - truth_vy
+  - truth_vz
+  - truth_class
+
+ctxt_global_vars:
+  - truth_ht
+  - truth_met_x
+  - truth_met_y
+  - ntruth

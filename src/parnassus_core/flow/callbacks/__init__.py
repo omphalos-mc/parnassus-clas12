@@ -1,13 +1,20 @@
 from .ema import EMA, EMAModelCheckpoint
-from .checkpoint import ModelCheckpoint
+from .checkpoint import Checkpoint
 from .saveconfig import SaveConfig
-from .performance import PerformanceLogger, ParticlePerformanceLogger
+from .performance import (
+    PerformanceLogger,
+    ParticlePerformanceLogger,
+    EventPerformanceLogger,
+    ImpactPerformanceLogger,
+)
 
 __all__ = [
     "EMA",
     "EMAModelCheckpoint",
-    "ModelCheckpoint",
+    "Checkpoint",
     "SaveConfig",
     "PerformanceLogger",
     "ParticlePerformanceLogger",
+    "EventPerformanceLogger",
+    "ImpactPerformanceLogger",
 ]

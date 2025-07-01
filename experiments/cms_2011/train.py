@@ -2,6 +2,7 @@ import argparse
 from datetime import datetime
 import glob
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -19,12 +20,14 @@ from lightning.pytorch.profilers import AdvancedProfiler
 from parnassus_core.flow.callbacks import (
     EMA,
     EMAModelCheckpoint,
-    ModelCheckpoint,
+    Checkpoint,
     SaveConfig,
     ParticlePerformanceLogger,
+    EventPerformanceLogger,
+    ImpactPerformanceLogger,
 )
 from parnassus_core.flow.models.wrapper import FlowLightning
-from data import CMSDataModule
+from dataset import CMSDataModule
 
 yaml.add_constructor(
     "!include", yaml_include.Constructor(base_dir=Path(__file__).parent / "configs")
@@ -141,20 +144,14 @@ def get_callbacks(config, args):
             )
         ]
     else:
-        checkpoint_callback_cls = ModelCheckpoint
+        checkpoint_callback_cls = Checkpoint
     # initialise checkpoint callback
     if not args.test_run:
         monitor_loss = "val/loss"
 
-        # filename template
-        file_name = config["name"] + "-{epoch:02d}-{" + monitor_loss + ":.4f}"
-
         # callback
         checkpoint_callback = checkpoint_callback_cls(
             monitor=monitor_loss,
-            dirpath=os.path.join(config["log_dir"], "ckpts"),
-            filename=file_name,
-            save_top_k=-1,
             save_last=True,
         )
         callbacks += [checkpoint_callback]
@@ -164,7 +161,13 @@ def get_callbacks(config, args):
             StochasticWeightAveraging(swa_lrs=float(config["optimizer_kwargs"]["lr"]))
         ]
 
-    callbacks += [SaveConfig(), ParticlePerformanceLogger()]
+    callbacks += [SaveConfig()]
+    if config["model_type"] == "particle_network":
+        callbacks += [ParticlePerformanceLogger()]
+    elif config["model_type"] == "event_network":
+        callbacks += [EventPerformanceLogger()]
+    elif config["model_type"] == "impact_network":
+        callbacks += [ImpactPerformanceLogger()]
 
     return callbacks
 
@@ -173,7 +176,6 @@ def train(args, config, logger):
     """
     Fit the model.
     """
-
 
     model = FlowLightning(config)
 
@@ -218,7 +220,7 @@ def train(args, config, logger):
         gradient_clip_val=config.get("gradient_clip_val", None),
         precision=config.get("precision", "32-true"),
         profiler=profiler,
-        default_root_dir=config['log_dir'],
+        default_root_dir=config["log_dir"],
     )
 
     # fit model model
@@ -298,7 +300,18 @@ def main():
     dirname = f"{config['name']}_{timestamp}"
     log_dir_timestamp = str(Path(log_dir / dirname).resolve())
     config["log_dir"] = log_dir_timestamp
-    os.makedirs(log_dir_timestamp, exist_ok=True)
+    if not args.test_run:
+        os.makedirs(log_dir_timestamp, exist_ok=True)
+        scale_dict_path = config["data"]["scale_dict_path"]
+        shutil.copyfile(
+            scale_dict_path,
+            os.path.join(log_dir_timestamp, scale_dict_path.split("/")[-1]),
+        )
+        config["data"]["scale_dict_path"] = os.path.join(
+            log_dir_timestamp, scale_dict_path.split("/")[-1]
+        )
+        with open(os.path.join(log_dir_timestamp, "config.yaml"), "w") as file:
+            yaml.dump(config, file)
     # setup logger
     logger = setup_logger(args, config)
 

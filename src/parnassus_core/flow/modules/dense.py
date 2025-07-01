@@ -73,7 +73,9 @@ class MLPBlock(nn.Module):
 
         if pre_norm is not None:
             # If the block is pre-normalised, add the normalisation first
-            self.block.append(getattr(nn, pre_norm)(input_dim + ctxt_dim))
+            self.block.append(
+                getattr(nn, pre_norm)(input_dim + ctxt_dim, elementwise_affine=False)
+            )
         for n in range(n_layers):
             # Increase the input dimension of the first layer to include context
             layer_input_dim = input_dim + ctxt_dim if n == 0 else output_dim
