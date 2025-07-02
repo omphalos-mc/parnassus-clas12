@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 
-from torch.nn.attention.flex_attention import create_block_mask
 
 from parnassus_core.flow.modules import (
     TimestepEmbedder,

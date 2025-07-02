@@ -439,21 +439,21 @@ class EventPerformanceLogger(PerformanceLogger):
                 axs[i][0],
                 plot_dict[f"pf_{var}"],
                 bins=bins[var],
-                label=f"PF",
+                label="PF",
                 histtype="stepfilled",
             )
             _add_to_hist(
                 axs[i][0],
                 plot_dict[f"fs_{var}"],
                 bins=bins[var],
-                label=f"FS",
+                label="FS",
                 histtype="step",
             )
             _add_to_hist(
                 axs[i][0],
                 plot_dict[f"tr_{var}"],
                 bins=bins[var],
-                label=f"TR",
+                label="TR",
                 histtype="step",
                 color="k",
             )
@@ -476,11 +476,11 @@ class EventPerformanceLogger(PerformanceLogger):
                 axs[i][1],
                 pf_res,
                 bins=res_bins[var],
-                label=f"PF-TR",
+                label="PF-TR",
                 histtype="stepfilled",
             )
             _add_to_hist(
-                axs[i][1], fs_res, bins=res_bins[var], label=f"FS-TR", histtype="step"
+                axs[i][1], fs_res, bins=res_bins[var], label="FS-TR", histtype="step"
             )
             axs[i][1].set_title(f"{VARIABLES_LABELS[var]} Residuals")
             axs[i][1].legend()
