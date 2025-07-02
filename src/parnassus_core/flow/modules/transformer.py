@@ -87,6 +87,7 @@ class CALayer(nn.Module):
             num_heads=num_heads,
             **mha_config,
         )
+        self.set_backend(mha_config.get("attn_type", "torch"))
 
     def set_backend(self, attn_type: str):
         self.attn.set_backend(attn_type)

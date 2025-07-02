@@ -5,7 +5,10 @@ import numpy as np
 from scipy.stats import norm
 
 from parnassus_core.flow.utils.loss import MSELoss, MSEAndDirectionLoss, Set2SetLoss
-from parnassus_core.flow.utils.scheduler import CosineAnnealingWarmupRestarts
+from parnassus_core.flow.utils.scheduler import (
+    CosineAnnealingWarmupRestarts,
+    WarmupDecayConstLR,
+)
 from parnassus_core.flow.models.part_net import ParticleNetwork
 from parnassus_core.flow.models.evt_net import EventNetwork
 from parnassus_core.flow.models.imp_net import ImpactNetwork
@@ -85,8 +88,7 @@ class FlowLightning(LightningModule):
         if self.flow_type == "icfm":
             self.FM = ConditionalFlowMatcher(sigma=self.sigma)
         elif self.flow_type == "rcfm":
-            self.FM = ReverseConditionalFlowMatcher(sigma=0.0)
-
+            self.FM = ReverseConditionalFlowMatcher(sigma=self.sigma)
         elif self.flow_type == "fm":
             self.FM = TargetConditionalFlowMatcher(sigma=self.sigma)
         elif self.flow_type == "vp":
@@ -207,16 +209,33 @@ class FlowLightning(LightningModule):
             return optimizer
         else:
             print("\nscheduler exists!\n")
-            default_scheduler_dict = {
-                "first_cycle_steps": 10,
-                "warmup_steps": 4,
-                "max_lr": 4 * self.config["optimizer_kwargs"]["lr"],
-                "min_lr": 1e-5,
-                "gamma": 0.8,
-            }
-            default_scheduler_dict.update(self.config.get("lr_scheduler_kwargs", {}))
-            scheduler = CosineAnnealingWarmupRestarts(
-                optimizer,
-                **default_scheduler_dict,
-            )
+            if self.config.get("lr_scheduler_type", "cosine") == "warmup_decay":
+                default_scheduler_dict = {
+                    "warmup_steps": 1000,
+                    "decay_steps": 10000,
+                    "min_lr": 1e-5,
+                }
+                default_scheduler_dict.update(self.config.get("lr_scheduler_dict", {}))
+                scheduler = {
+                    "scheduler": WarmupDecayConstLR(
+                        optimizer,
+                        warmup_steps=int(default_scheduler_dict["warmup_steps"]),
+                        decay_steps=int(default_scheduler_dict["decay_steps"]),
+                        min_lr=float(default_scheduler_dict["min_lr"]),
+                    ),
+                    "interval": "step",
+                }
+            elif self.config.get("lr_scheduler_type", "cosine") == "cosine":
+                default_scheduler_dict = {
+                    "first_cycle_steps": 10,
+                    "warmup_steps": 4,
+                    "max_lr": 4 * float(self.config["learningrate"]),
+                    "min_lr": 1e-5,
+                    "gamma": 0.8,
+                }
+                default_scheduler_dict.update(self.config.get("lr_scheduler_dict", {}))
+                scheduler = CosineAnnealingWarmupRestarts(
+                    optimizer,
+                    **default_scheduler_dict,
+                )
         return {"optimizer": optimizer, "lr_scheduler": scheduler}

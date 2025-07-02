@@ -10,6 +10,7 @@ from parnassus_core.flow.modules import (
     DenseNetwork,
     NamedNetwork,
     GlobalContextEmbedding,
+    FourierBase2Embedding,
 )
 from parnassus_core.flow.modules.transformer import CALayer
 
@@ -20,6 +21,10 @@ class ImpactNetwork(nn.Module):
         self.config = config
 
         self.time_embedding = TimestepEmbedder(**config["time_embedding"])
+        if "fourier" in config.keys():
+            self.fourier_embedding = FourierBase2Embedding(
+                **config["fourier"],
+            )
 
         self.fs_init_net = DenseNetwork(**config["fs_init_net"])
 
@@ -37,7 +42,7 @@ class ImpactNetwork(nn.Module):
                     CALayer(
                         **config["transformer"]["net_kwargs"],
                     )
-                    for _ in range(config["encoder"]["num_layers"])
+                    for _ in range(config["transformer"]["num_layers"])
                 ]
             )
 
@@ -57,7 +62,7 @@ class ImpactNetwork(nn.Module):
                 ]
             )
 
-        hidden_dim = config["fs_init_net"]["output_dim"]
+        hidden_dim = self.time_embedding.hidden_dim
         global_embd_dim = len(config["global_embedding"]["input_names"]) * hidden_dim
         self.fs_out_net = DenseNetwork(**config["fs_out_net"], ctxt_dim=global_embd_dim)
         self.adaLN_modulation = nn.Sequential(
@@ -77,18 +82,22 @@ class ImpactNetwork(nn.Module):
         timestep: torch.Tensor,
         ctxt_dict: dict[str, torch.Tensor],
     ):
-        fs_mask = ctxt_dict["fs_mask"]
-        fs_embd = self.fs_init_net(fs_data, ctxt=ctxt_dict.get("pf_ctxt_data", None))
-
-        ctxt_embd_dict = {}
+        ctxt_embd_dict: dict[str, torch.Tensor] = {}
         ctxt_net: NamedNetwork
         for ctxt_net in self.ctxt_networks:
             ctxt_embd_dict[ctxt_net.input_name + "_embd"] = ctxt_net(ctxt_dict)
-
         ctxt_embd_dict["time_embd"] = self.time_embedding(timestep)
 
-        global_embd = self.global_embedding(ctxt_embd_dict, ctxt_dict)
+        fs_mask = ctxt_dict["fs_mask"]
+        if hasattr(self, "fourier_embedding"):
+            fourier = self.fourier_embedding(fs_data)
+            fs_data = torch.cat([fs_data, fourier], dim=-1)
 
+        fs_embd = self.fs_init_net(fs_data)
+        if "pf_ctxt_embd" in ctxt_embd_dict:
+            fs_embd = torch.cat([fs_embd, ctxt_embd_dict["pf_ctxt_embd"]], dim=-1)
+
+        global_embd = self.global_embedding(ctxt_embd_dict, ctxt_dict)
         (
             shift_mlp,
             scale_mlp,

@@ -3,6 +3,7 @@ from .embedding import (
     TimestepEmbedder,
     PositionalEmbedding,
     GlobalContextEmbedding,
+    FourierBase2Embedding,
 )
 from .transformer import CATransformer
 
@@ -14,4 +15,5 @@ __all__ = [
     "CATransformer",
     "PositionalEmbedding",
     "GlobalContextEmbedding",
+    "FourierBase2Embedding",
 ]

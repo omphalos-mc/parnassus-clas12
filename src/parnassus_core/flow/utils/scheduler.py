@@ -124,3 +124,38 @@ class CosineAnnealingWarmupRestarts(_LRScheduler):
             param_group["lr"] = lr
 
         self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
+
+
+class WarmupDecayConstLR(_LRScheduler):
+    def __init__(
+        self,
+        optimizer,
+        warmup_steps: int,
+        decay_steps: int,
+        min_lr: float,
+        last_epoch: int = -1,
+    ):
+        self.warmup_steps = warmup_steps
+        self.decay_steps = decay_steps
+        self.min_lr = min_lr
+        super().__init__(optimizer, last_epoch)
+
+    def get_lr(self, epoch=None):
+        step = self.last_epoch + 1 if epoch is None else epoch
+
+        if step < self.warmup_steps:
+            # Linear warmup
+            warmup_factor = step / float(self.warmup_steps)
+            return [base_lr * warmup_factor for base_lr in self.base_lrs]
+
+        elif step < self.warmup_steps + self.decay_steps:
+            # Smooth decay (cosine)
+            decay_step = step - self.warmup_steps
+            decay_factor = 0.5 * (1 + math.cos(math.pi * decay_step / self.decay_steps))
+            return [
+                self.min_lr + (base_lr - self.min_lr) * decay_factor
+                for base_lr in self.base_lrs
+            ]
+        else:
+            # Constant min LR
+            return [self.min_lr for _ in self.base_lrs]

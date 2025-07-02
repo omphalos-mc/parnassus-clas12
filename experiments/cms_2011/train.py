@@ -12,7 +12,7 @@ import torch
 import yaml
 import yaml_include
 from lightning.pytorch import Trainer
-from lightning.pytorch.callbacks import StochasticWeightAveraging
+from lightning.pytorch.callbacks import StochasticWeightAveraging, ModelSummary
 from lightning.pytorch.callbacks import TQDMProgressBar as ProgressBar
 from lightning.pytorch.loggers import CometLogger
 from lightning.pytorch.profilers import AdvancedProfiler
@@ -130,7 +130,7 @@ def get_callbacks(config, args):
     """
 
     refresh_rate = 1 if args.test_run else 20
-    callbacks = [ProgressBar(refresh_rate=refresh_rate)]
+    callbacks = [ProgressBar(refresh_rate=refresh_rate), ModelSummary(max_depth=2)]
 
     assert (config.get("use_ema", False) != config["use_swa"]) or config[
         "use_ema"

@@ -182,7 +182,9 @@ class CMSDataset(Dataset):
         """
         Converts the data to torch tensors and applies the mask if needed
         """
-        for var, value in tqdm(self.full_data_array.items()):
+        for var, value in tqdm(
+            self.full_data_array.items(), desc="Merging and preprocessing data"
+        ):
             if mask_events:
                 value = value[self.n_particle_mask]
             if value.dtype == np.object_:
@@ -202,7 +204,7 @@ class CMSDataset(Dataset):
             ]
         )
         means = np.zeros((self.nevents, n_vars), dtype=np.float32)
-        for i, var in enumerate(self.ctxt_vars):
+        for i, var in tqdm(enumerate(self.ctxt_vars), desc="Calculating means"):
             if var.startswith("truth_") and "class" not in var:
                 means[:, i] = (
                     np.add.reduceat(
@@ -247,7 +249,7 @@ class CMSDataset(Dataset):
             entry_stop=self.nevents + self.entry_start,
             entry_start=self.entry_start,
         )
-        for var in tqdm(vars_to_load):
+        for var in tqdm(vars_to_load, desc=f"Loading {collection} data"):
             self.full_data_array[var] = arrays[var]
 
         self.full_data_array[f"{collection}_ht"] = np.zeros(

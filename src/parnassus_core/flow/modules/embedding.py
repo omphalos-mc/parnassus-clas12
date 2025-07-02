@@ -3,7 +3,7 @@ import torch as T
 import torch.nn as nn
 
 
-class Base2FourierFeatures(nn.Module):
+class FourierBase2Embedding(nn.Module):
     def __init__(self, start=0, stop=8, step=1):
         super().__init__()
         self.start = start
@@ -22,6 +22,9 @@ class Base2FourierFeatures(nn.Module):
         features = inputs.unsqueeze(1) * freqs  # Broadcasting multiplication
         features = features.transpose(1, 2).flatten(-2, -1)
         return T.cat([T.sin(features), T.cos(features)], dim=-1)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(start={self.start}, stop={self.stop}, step={self.step})"
 
 
 class PositionalEmbedding(nn.Module):
@@ -45,6 +48,9 @@ class PositionalEmbedding(nn.Module):
         x = x + self.pe[: x.size(1)].view(1, x.size(1), -1)
         return self.dropout(x)
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}(d_model={self.pe.shape[1]}, dropout={self.dropout.p}, max_len={self.pe.shape[0]})"
+
 
 class TimestepEmbedder(nn.Module):
     """
@@ -59,6 +65,8 @@ class TimestepEmbedder(nn.Module):
         time_factor: float = 1,
     ):
         super().__init__()
+        self.hidden_dim = hidden_dim
+
         self.mlp = nn.Sequential(
             nn.Linear(frequency_embedding_size, hidden_dim, bias=True),
             nn.SiLU(),
@@ -96,6 +104,9 @@ class TimestepEmbedder(nn.Module):
         t_emb = self.mlp(t_freq)
         return t_emb
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}(hidden_dim={self.mlp[0].out_features}, frequency_embedding_size={self.frequency_embedding_size}, max_period={self.max_period}, time_factor={self.time_factor})"
+
 
 class GlobalContextEmbedding(nn.Module):
     """Constructs a global context embedding from a dictionary of tensors."""
@@ -128,3 +139,6 @@ class GlobalContextEmbedding(nn.Module):
                 ctxt_embd.append(embd)
 
         return T.cat(ctxt_embd, dim=-1) if ctxt_embd else T.zeros(0)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(input_names={self.input_names})"
