@@ -183,7 +183,6 @@ class FlowLightning(LightningModule):
     def on_train_epoch_end(self):
         if self.config["lr_scheduler"] is not False:
             self.log("lr", self.lr_schedulers().get_last_lr()[0], sync_dist=True)
-            self.lr_schedulers().step(epoch=self.current_epoch)
 
     def configure_optimizers(self):
         self.config["optimizer_kwargs"]["lr"] = float(
@@ -208,8 +207,8 @@ class FlowLightning(LightningModule):
         if self.config["lr_scheduler"] is False:
             return optimizer
         else:
-            print("\nscheduler exists!\n")
             if self.config.get("lr_scheduler_type", "cosine") == "warmup_decay":
+                print("Using warmup_decay scheduler")
                 default_scheduler_dict = {
                     "warmup_steps": 1000,
                     "decay_steps": 10000,
@@ -226,6 +225,7 @@ class FlowLightning(LightningModule):
                     "interval": "step",
                 }
             elif self.config.get("lr_scheduler_type", "cosine") == "cosine":
+                print("Using cosine annealing warmup restarts scheduler")
                 default_scheduler_dict = {
                     "first_cycle_steps": 10,
                     "warmup_steps": 4,

@@ -1,6 +1,23 @@
 import torch
 from collections import defaultdict
 
+TRANSFORM_TYPES = {
+    "std",
+    "min_max",
+    "min_max_sym",
+}
+
+TRANSFORM_FUNCTIONS = {
+    "log",
+    "log1p",
+    "sqrt",
+    "tanh",
+    "asinh",
+    "atan",
+    "pow",
+    None,  # No function
+}
+
 
 class VarTransform:
     def __init__(self, name, config):
@@ -8,6 +25,17 @@ class VarTransform:
         self.config = config
         self.type = self.config.get("type", "std")
         self.fn = self.config.get("fn", None)
+        self.fn_scale = self.config.get("fn_scale", 1.0)
+        self.power = self.config.get("power", 1.0)
+
+        assert self.fn in TRANSFORM_FUNCTIONS, (
+            f"Unknown transformation function {self.fn}. "
+            f"Available functions: {TRANSFORM_FUNCTIONS}"
+        )
+        assert self.type in TRANSFORM_TYPES, (
+            f"Unknown transformation type {self.type}. "
+            f"Available types: {TRANSFORM_TYPES}"
+        )
 
         if self.type == "std":
             self.shift = self.config.get("mean", 0.0)
@@ -20,21 +48,19 @@ class VarTransform:
             max_ = self.config.get("max", 1.0)
             self.shift = (max_ + min_) / 2
             self.scale = (max_ - min_) / 2
-        assert self.type in ["std", "min_max", "min_max_sym"], (
-            f"Unknown scaling type {self.type}"
-        )
 
     def transform(self, x, shift=None, scale=None):
         if shift is None:
             shift = self.shift
         if scale is None:
             scale = self.scale
-        if self.fn == "log":
-            x = torch.log(x)
-        elif self.fn == "log1p":
-            x = torch.log1p(x)
-        elif self.fn == "sqrt":
-            x = torch.sqrt(x)
+        match self.fn:
+            case "log" | "log1p" | "sqrt" | "tanh" | "asinh" | "atan":
+                x = getattr(torch, self.fn)(x / self.fn_scale)
+            case "pow":
+                x = torch.sign(x) * torch.pow(torch.abs(x) / self.fn_scale, self.power)
+            case _:
+                x = x / self.fn_scale
 
         return (x - shift) / scale
 
@@ -44,13 +70,25 @@ class VarTransform:
         if scale is None:
             scale = self.scale
         x = x * scale + shift
-        if self.fn == "log":
-            return torch.exp(x)
-        elif self.fn == "log1p":
-            return torch.expm1(x)
-        elif self.fn == "sqrt":
-            return torch.pow(x, 2)
-
+        match self.fn:
+            case "log":
+                return torch.exp(x) * self.fn_scale
+            case "log1p":
+                return torch.expm1(x) * self.fn_scale
+            case "sqrt":
+                return torch.pow(x, 2) * self.fn_scale
+            case "tanh":
+                return torch.atanh(x) * self.fn_scale
+            case "asinh":
+                return torch.sinh(x) * self.fn_scale
+            case "atan":
+                return torch.tan(x) * self.fn_scale
+            case "pow":
+                return torch.sign(x) * torch.pow(torch.abs(x), 1 / self.power)
+            case _:
+                # For other functions, we assume they are linear transformations
+                # and do not need to be inverted.
+                return x * self.fn_scale
         return x
 
 
