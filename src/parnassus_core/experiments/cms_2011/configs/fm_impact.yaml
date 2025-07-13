@@ -1,4 +1,4 @@
-name: icfm_cms_pow_fevt_MSEDir_EMAMeanAtan_Impact
+name: icfm_cms_pow_fevt_MSEDir_EMAMeanAtan_PFCross_Impact
 model_type: impact_network
 flow_type: icfm
 sigma: 0.0
@@ -48,12 +48,13 @@ data:
   valid_path: /storage/agrp/dmitrykl/fastsim/f_delphes/data/full_event/output_impact/QCD_Pt-470to600_TTbar_Merged/merged_train_v2_pt025_eta27_ghost.root
   test_path: /storage/agrp/dmitrykl/fastsim/f_delphes/data/full_event/output_impact/QCD_Pt-600to800_TuneZ2_7TeV_pythia6/merged_test_small_v2_pt025_eta27_ghost.root
 
-  scale_dict_path: /srv01/agrp/dmitrykl/projects/parnassus-core/experiments/cms_2011/configs/var_transform.yaml
+  scale_dict_path: /srv01/agrp/dmitrykl/projects/parnassus-core/src/experimentscms_2011/configs/var_transform_atan.yaml
 
   variables: !include impact_vars.yaml
 
 
 model:
+    ca_collection: pf_ctxt
     time_embedding:
         hidden_dim: &dim 96
         time_factor: 1000
@@ -64,7 +65,7 @@ model:
     fs_init_net:
         input_dim: 20
         hidden_dim: &dim2 192
-        output_dim: 48
+        output_dim: *dim
         act_h: &act SiLU
 
     ctxt_networks:
@@ -73,16 +74,16 @@ model:
           dense_kwargs:
             input_dim: 12
             hidden_dim: *dim2
-            output_dim: 48
-            act_h: *act
-
-        - input_name: ctxt
-          fields: ['data']
-          dense_kwargs:
-            input_dim: 12
-            hidden_dim: *dim
             output_dim: *dim
             act_h: *act
+
+        # - input_name: ctxt
+        #   fields: ['data']
+        #   dense_kwargs:
+        #     input_dim: 12
+        #     hidden_dim: *dim
+        #     output_dim: *dim
+        #     act_h: *act
         
         - input_name: ctxt_global
           fields: ['data']
