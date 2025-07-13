@@ -6,6 +6,8 @@
 # License: MIT License
 
 import math
+import numpy as np
+from scipy.stats import norm
 from typing import Union
 
 import torch
@@ -608,3 +610,70 @@ class HeavyTailConditionalFlowMatcher(ConditionalFlowMatcher):
             return t, xt, ut, eps
         else:
             return t, xt, ut
+
+
+class FlowMatcher:
+    def __init__(
+        self,
+        flow_type: str,
+        sigma: float,
+        time_pow: bool = False,
+        time_lognorm: bool = False,
+        time_mode: bool = False,
+    ):
+        assert flow_type in [
+            "fm",
+            "icfm",
+            "rcfm",
+            "vp",
+        ], f"Unknown model {flow_type}, must be one of ['icfm', 'rcfm', 'fm', 'vp']"
+        self.flow_type = flow_type
+        self.sigma = sigma
+        self.time_pow = time_pow
+        self.time_lognorm = time_lognorm
+        self.time_mode = time_mode
+
+        if self.time_pow + self.time_lognorm + self.time_mode > 1:
+            raise ValueError(
+                "Only one of time_pow, time_lognorm, time_mode can be True at a time."
+            )
+        match self.flow_type:
+            case "icfm":
+                self.FM = ConditionalFlowMatcher(sigma=self.sigma)
+            case "rcfm":
+                self.FM = ReverseConditionalFlowMatcher(sigma=self.sigma)
+            case "fm":
+                self.FM = TargetConditionalFlowMatcher(sigma=self.sigma)
+            case "vp":
+                self.FM = VariancePreservingConditionalFlowMatcher(sigma=self.sigma)
+
+        print("Using time_pow:", self.time_pow)
+        print("Using time_lognorm:", self.time_lognorm)
+        print("Using time_mode:", self.time_mode)
+        print("Using flow type:", self.flow_type)
+
+    def sample_from_logit_normal(self, mu, sigma, size):
+        samples = norm.rvs(loc=mu, scale=sigma, size=size)
+        samples = 1 / (1 + np.exp(-samples))
+        return samples
+
+    def sample_from_mode(self, s, size):
+        t = np.random.rand(size)
+        return 1 - t - s * (np.cos(np.pi / 2 * t) ** 2 - 1 + t)
+
+    def sample(self, x: torch.Tensor):
+        device = x.device
+        shape = x.shape
+        x0 = torch.randn_like(x)
+        if self.time_pow:
+            t = np.random.power(3, size=shape[0])
+        elif self.time_lognorm:
+            t = self.sample_from_logit_normal(0, 1, size=shape[0])
+        elif self.time_mode:
+            t = self.sample_from_mode(-0.54, size=shape[0])
+        else:
+            t = np.random.rand(shape[0])
+        t = torch.FloatTensor(t).to(device)
+        return self.FM.sample_location_and_conditional_flow(
+            x0, x, t=t, return_noise=False
+        )

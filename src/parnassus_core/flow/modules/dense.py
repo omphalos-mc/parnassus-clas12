@@ -1,3 +1,4 @@
+from typing import Any
 import torch as T
 from torch import Tensor
 import torch.nn as nn
@@ -153,6 +154,8 @@ class DenseNetwork(nn.Module):
         norm: str | None = None,
         dropout: float = 0,
         do_res: bool = False,
+        layer_scale: bool = False,
+        pre_norm: str | None = None,
         ctxt_in_input: bool = True,
         ctxt_in_hidden: bool = False,
         output_init_zeros: bool = False,
@@ -190,6 +193,10 @@ class DenseNetwork(nn.Module):
         do_res : bool, optional
             Use resisdual-connections between hidden blocks (only if same size),
             by default False
+        layer_scale : bool, optional
+            Use layer scale in the hidden blocks, by default False
+        pre_norm : str | None, optional
+            If the block is pre-normalised, by default None
         ctxt_in_input : bool, optional
             Include the ctxt tensor in the input block, by default True
         ctxt_in_hidden : bool, optional
@@ -232,6 +239,9 @@ class DenseNetwork(nn.Module):
             act=act_h,
             norm=norm,
             dropout=dropout,
+            do_res=do_res,
+            layer_scale=layer_scale,
+            pre_norm=pre_norm,
         )
 
         # All hidden blocks as a single module list
@@ -249,6 +259,8 @@ class DenseNetwork(nn.Module):
                         norm=norm,
                         dropout=dropout,
                         do_res=do_res,
+                        layer_scale=layer_scale,
+                        pre_norm=pre_norm,
                     )
                 )
 
@@ -333,8 +345,9 @@ class NamedNetwork(nn.Module):
     def __init__(
         self,
         input_name: str,
-        dense_kwargs: dict[str, str],
+        dense_kwargs: dict[str, Any],
         fields: list[str],
+        context_name: str | None = None,
     ):
         """A wrapper which takes a list of input features, concatenates them, and passes them through a dense
         layer followed by an optional positional encoding module.
@@ -353,9 +366,15 @@ class NamedNetwork(nn.Module):
             An optional module used to perform the positional encoding.
         """
         super().__init__()
-        self.input_name = input_name
-        self.net = DenseNetwork(**dense_kwargs)
-        self.fields = fields
+        self.input_name: str = input_name
+        self.net: DenseNetwork = DenseNetwork(**dense_kwargs)
+        self.fields: list[str] = fields
+        self.context_name: str | None = context_name
+
+        if context_name is not None:
+            assert self.net.ctxt_dim > 0, (
+                "The context name is set but the dense network does not have a context dimension!"
+            )
 
     def forward(self, inputs: dict[str, Tensor]) -> Tensor:
         """Embed the set of input features into an embedding.
@@ -377,7 +396,8 @@ class NamedNetwork(nn.Module):
         x = self.net(
             concat_tensors(
                 [inputs[f"{self.input_name}_{field}"] for field in self.fields]
-            )
+            ),
+            ctxt=inputs[self.context_name] if self.context_name else None,
         )
 
         return x

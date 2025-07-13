@@ -105,18 +105,18 @@ def get_empty_transform() -> VarTransform:
 
 
 class FeatureScaler:
-    def __init__(self, scale_dict_path: str):
+    def __init__(self, scale_dict: str):
         """
         Initialize the FeatureScaler with a path to a YAML file containing scaling parameters.
 
         Parameters
         ----------
-        scale_dict_path : str
+        scale_dict : str
             Path to the YAML file containing scaling parameters for features.
         """
         import yaml
 
-        with open(scale_dict_path, "r") as f:
+        with open(scale_dict, "r") as f:
             self.scale_dict = yaml.safe_load(f)
         self.transforms = defaultdict(get_empty_transform)
         for name, config in self.scale_dict.items():

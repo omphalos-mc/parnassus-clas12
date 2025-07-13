@@ -60,7 +60,7 @@ def modulate(x, shift, scale):
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
 
-class CALayer(nn.Module):
+class DiTLayer(nn.Module):
     def __init__(
         self,
         hidden_dim: int,
@@ -121,7 +121,17 @@ class CALayer(nn.Module):
         nn.init.constant_(self.adaLN_modulation[-1].bias, 0)
 
 
-class CABlock(nn.Module):
+class SADiTLayer(DiTLayer):
+    def forward(self, seq, ctxt, mask=None):
+        return super().forward(seq, seq, ctxt, mask)
+
+
+class CADiTLayer(DiTLayer):
+    def forward(self, seq_q, seq_k, ctxt, mask_k=None):
+        return super().forward(seq_q, seq_k, ctxt, mask_k)
+
+
+class DiTBlock(nn.Module):
     def __init__(
         self,
         hidden_dim,
@@ -129,47 +139,69 @@ class CABlock(nn.Module):
         mha_config=None,
         mlp_ratio=4.0,
         ctxt_ratio=3.0,
-        is_last=False,
+        bidirectional=False,
+        do_selfattn=False,
     ):
         super().__init__()
-        self.is_last = is_last
-        if not is_last:
-            self.layer_a = CALayer(
-                hidden_dim,
-                num_heads,
-                mha_config,
-                mlp_ratio,
-                ctxt_ratio,
+        self.bidirectional = bidirectional
+        self.do_selfattn = do_selfattn
+
+        kwargs = {
+            "hidden_dim": hidden_dim,
+            "num_heads": num_heads,
+            "mha_config": mha_config,
+            "mlp_ratio": mlp_ratio,
+            "ctxt_ratio": ctxt_ratio,
+        }
+
+        if do_selfattn:
+            self.sa_layer_a = SADiTLayer(
+                **kwargs,
             )
-        self.layer_b = CALayer(
-            hidden_dim,
-            num_heads,
-            mha_config,
-            mlp_ratio,
-            ctxt_ratio,
+            if bidirectional:
+                self.sa_layer_b = SADiTLayer(
+                    **kwargs,
+                )
+        self.ca_layer_a = CADiTLayer(
+            **kwargs,
         )
+        if bidirectional:
+            self.ca_layer_b = CADiTLayer(
+                **kwargs,
+            )
 
     def set_backend(self, attn_type: str):
         self.attn_type = attn_type
-        if not self.is_last:
-            self.layer_a.set_backend(self.attn_type)
-        self.layer_b.set_backend(self.attn_type)
+        if self.do_selfattn:
+            self.sa_layer_a.set_backend(attn_type)
+            if self.bidirectional:
+                self.sa_layer_b.set_backend(attn_type)
+        self.ca_layer_a.set_backend(attn_type)
+        if self.bidirectional:
+            self.ca_layer_b.set_backend(attn_type)
         return self.attn_type
 
     def forward(self, seq_a, seq_b, ctxt, mask_a=None, mask_b=None):
-        seq_b = self.layer_b(seq_q=seq_b, seq_k=seq_a, ctxt=ctxt, mask_k=mask_a)
-        if not self.is_last:
-            seq_a = self.layer_a(seq_q=seq_a, seq_k=seq_b, ctxt=ctxt, mask_k=mask_b)
-
+        if self.do_selfattn:
+            seq_a = self.sa_layer_a(seq=seq_a, ctxt=ctxt, mask=mask_a)
+        seq_a = self.ca_layer_a(seq_q=seq_a, seq_k=seq_b, ctxt=ctxt, mask_k=mask_b)
+        if self.bidirectional:
+            if self.do_selfattn:
+                seq_b = self.sa_layer_b(seq=seq_b, ctxt=ctxt, mask=mask_b)
+            seq_b = self.ca_layer_b(seq_q=seq_b, seq_k=seq_a, ctxt=ctxt, mask_k=mask_a)
         return seq_a, seq_b
 
     def reset_parameters(self):
-        if not self.is_last:
-            self.layer_a.reset_parameters()
-        self.layer_b.reset_parameters()
+        if self.do_selfattn:
+            self.sa_layer_a.reset_parameters()
+            if self.bidirectional:
+                self.sa_layer_b.reset_parameters()
+        self.ca_layer_a.reset_parameters()
+        if self.bidirectional:
+            self.ca_layer_b.reset_parameters()
 
 
-class CATransformer(nn.Module):
+class DiTEncoder(nn.Module):
     def __init__(
         self,
         hidden_dim: int,
@@ -179,24 +211,29 @@ class CATransformer(nn.Module):
         mlp_ratio: float = 4.0,
         ctxt_ratio: float = 3.0,
         attn_type: str = "flex",
+        do_selfattn: bool = False,
+        bidirectional: bool = True,
     ):
         super().__init__()
         self.attn_type = attn_type
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
         self.num_layers = num_layers
+        self.do_selfattn = do_selfattn
+        self.bidirectional = bidirectional
         if mha_config is None:
             mha_config = {}
         mha_config["attn_type"] = attn_type
         self.layers = nn.ModuleList(
             [
-                CABlock(
+                DiTBlock(
                     hidden_dim=hidden_dim,
                     num_heads=num_heads,
                     mha_config=mha_config,
                     mlp_ratio=mlp_ratio,
                     ctxt_ratio=ctxt_ratio,
-                    is_last=(i == num_layers - 1),
+                    bidirectional=bidirectional and i != num_layers - 1,
+                    do_selfattn=do_selfattn,
                 )
                 for i in range(num_layers)
             ]
@@ -205,7 +242,7 @@ class CATransformer(nn.Module):
 
     def set_backend(self, attn_type: str):
         self.attn_type = attn_type
-        layer: CALayer
+        layer: DiTBlock
         for layer in self.layers:
             self.attn_type = layer.set_backend(self.attn_type)
         return self.attn_type

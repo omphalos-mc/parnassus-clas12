@@ -1,5 +1,6 @@
 import gc
-
+from typing import Literal
+import yaml
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -36,33 +37,37 @@ class CMSDataset(Dataset):
     def __init__(
         self,
         filename,
-        config,
-        scale_dict_path: str,
+        max_particles: int,
+        train_type: str,
+        sin_cos: bool,
+        zero_neutral_vtx: bool,
+        scale_dict: str,
+        var_dict: str,
+        fs_mask_type: Literal["all", "charged", "neutral"] = "all",
         reduce_ds: float | int = 1.0,
         entry_start: int = 0,
         mode: str = "train",
     ):
         super().__init__()
-        self.config = config
-        self.feature_scaler = FeatureScaler(scale_dict_path)
-        self.max_particles = self.config["max_particles"]
-
-        self.variables_config = self.config["variables"]
+        self.feature_scaler = FeatureScaler(scale_dict)
+        self.max_particles = max_particles
+        with open(var_dict, "r") as f:
+            self.variables_config = yaml.safe_load(f)
         self.truth_vars_to_load = self.variables_config["truth_vars_to_load"]
         self.pflow_vars_to_load = self.variables_config["pflow_vars_to_load"]
         self.fs_vars = self.variables_config["fs_vars"]
         self.ctxt_vars = self.variables_config["ctxt_vars"]
         self.ctxt_global_vars = self.variables_config["ctxt_global_vars"]
-        self.fs_mask_type = self.config.get("fs_mask_type", "all")
+        self.fs_mask_type = fs_mask_type
 
         self.mode = mode
 
         assert self.mode in ["train", "eval"], "Mode must be either 'train' or 'eval'"
 
-        self.train_type = self.config.get("train_type", "particle")
-        self.sin_cos = self.config.get("sin_cos", False)
+        self.train_type = train_type
+        self.sin_cos = sin_cos
 
-        self.zero_neutral_vtx = self.config.get("zero_neutral_vtx", False)
+        self.zero_neutral_vtx = zero_neutral_vtx
 
         self.file = uproot.open(filename, num_workers=6)
         self.tree = self.file["evt_tree"]
@@ -441,12 +446,45 @@ class CMSDataset(Dataset):
 class CMSDataModule(LightningDataModule):
     def __init__(
         self,
-        config: dict,
-        **kwargs,
+        num_workers: int,
+        train_path: str,
+        valid_path: str,
+        test_path: str,
+        num_train: int,
+        num_valid: int,
+        train_batch_size: int,
+        valid_batch_size: int,
+        max_particles: int,
+        train_type: Literal["particle", "event"],
+        sin_cos: bool,
+        zero_neutral_vtx: bool,
+        scale_dict: str,
+        var_dict: str,
+        fs_mask_type: Literal["all", "charged", "neutral"] = "all",
+        entry_start_train: int = 0,
+        entry_start_valid: int = 0,
+        entry_start_test: int = 0,
     ):
         super().__init__()
-        self.config = config
-        self.kwargs = kwargs
+        self.num_workers = num_workers
+        self.train_path = train_path
+        self.valid_path = valid_path
+        self.test_path = test_path
+        self.train_batch_size = train_batch_size
+        self.valid_batch_size = valid_batch_size
+        self.max_particles = max_particles
+        self.train_type = train_type
+        self.sin_cos = sin_cos
+        self.zero_neutral_vtx = zero_neutral_vtx
+        self.scale_dict = scale_dict
+        self.var_dict = var_dict
+        self.num_train = num_train
+        self.num_valid = num_valid
+        self.entry_start_train = entry_start_train
+        self.entry_start_valid = entry_start_valid
+        self.entry_start_test = entry_start_test
+
+        self.fs_mask_type = fs_mask_type
 
     def setup(self, stage: str = None):
         if self.trainer.is_global_zero:
@@ -454,20 +492,30 @@ class CMSDataModule(LightningDataModule):
 
         # create training and validation datasets
         self.train_dset = CMSDataset(
-            config=self.config,
-            filename=self.config["train_path"],
-            scale_dict_path=self.config["scale_dict_path"],
-            reduce_ds=self.config["num_train"],
-            entry_start=self.config.get("entry_start_train", 0),
+            filename=self.train_path,
+            max_particles=self.max_particles,
+            train_type=self.train_type,
+            sin_cos=self.sin_cos,
+            zero_neutral_vtx=self.zero_neutral_vtx,
+            scale_dict=self.scale_dict,
+            var_dict=self.var_dict,
+            reduce_ds=self.num_train,
+            entry_start=self.entry_start_train,
+            fs_mask_type=self.fs_mask_type,
             mode="train",
         )
 
         self.valid_dset = CMSDataset(
-            config=self.config,
-            filename=self.config["valid_path"],
-            scale_dict_path=self.config["scale_dict_path"],
-            reduce_ds=self.config["num_valid"],
-            entry_start=self.config.get("entry_start_valid", 0),
+            filename=self.valid_path,
+            max_particles=self.max_particles,
+            train_type=self.train_type,
+            sin_cos=self.sin_cos,
+            zero_neutral_vtx=self.zero_neutral_vtx,
+            scale_dict=self.scale_dict,
+            var_dict=self.var_dict,
+            reduce_ds=self.num_valid,
+            entry_start=self.entry_start_valid,
+            fs_mask_type=self.fs_mask_type,
             mode="train",
         )
 
@@ -484,7 +532,7 @@ class CMSDataModule(LightningDataModule):
             batch_size=batch_size,
             collate_fn=None,
             sampler=None,
-            num_workers=self.config["num_workers"],
+            num_workers=self.num_workers,
             shuffle=shuffle,
             pin_memory=False,
         )
@@ -492,15 +540,11 @@ class CMSDataModule(LightningDataModule):
     def train_dataloader(self):
         print("Instantiating train dataloader on rank", self.trainer.local_rank)
         return self.get_dataloader(
-            dataset=self.train_dset,
-            shuffle=True,
-            batch_size=self.config["train_batch_size"],
+            dataset=self.train_dset, shuffle=True, batch_size=self.train_batch_size
         )
 
     def val_dataloader(self):
         print("Instantiating validation dataloader on rank", self.trainer.local_rank)
         return self.get_dataloader(
-            dataset=self.valid_dset,
-            shuffle=False,
-            batch_size=self.config["valid_batch_size"],
+            dataset=self.valid_dset, shuffle=False, batch_size=self.valid_batch_size
         )

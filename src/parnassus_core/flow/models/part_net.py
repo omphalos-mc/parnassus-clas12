@@ -5,32 +5,30 @@ import torch.nn as nn
 from torch.nn.attention.flex_attention import create_block_mask
 
 from parnassus_core.flow.modules import (
-    TimestepEmbedder,
-    CATransformer,
-    DenseNetwork,
     NamedNetwork,
-    GlobalContextEmbedding,
 )
 
 
 class ParticleNetwork(nn.Module):
-    def __init__(self, config):
+    def __init__(
+        self,
+        time_embedding: nn.Module,
+        fs_init_net: nn.Module,
+        ctxt_networks: nn.ModuleList,
+        global_embedding: nn.Module,
+        encoder: nn.Module,
+        fs_out_net: nn.Module,
+    ):
         super().__init__()
-        self.config = config
 
-        self.time_embedding = TimestepEmbedder(**config["time_embedding"])
+        self.time_shape = (-1, 1, 1)  # (batch_size, 1, 1)
 
-        self.fs_init_net = DenseNetwork(**config["fs_init_net"])
-
-        self.ctxt_networks = nn.ModuleList()
-        for net_config in config["ctxt_networks"]:
-            self.ctxt_networks.append(NamedNetwork(**net_config))
-
-        self.global_embedding = GlobalContextEmbedding(
-            input_names=config["global_embedding"]["input_names"]
-        )
-
-        self.encoder = CATransformer(**config["encoder"])
+        self.time_embedding = time_embedding
+        self.fs_init_net = fs_init_net
+        self.ctxt_networks = ctxt_networks
+        self.global_embedding = global_embedding
+        self.encoder = encoder
+        self.fs_out_net = fs_out_net
 
         self.attn_type = self.encoder.attn_type
 
@@ -40,7 +38,6 @@ class ParticleNetwork(nn.Module):
             )
         else:
             self.context_manager = nullcontext()
-        self.fs_out_net = DenseNetwork(**config["fs_out_net"])
 
     def create_padding_mask(self, pads_kv):
         def padding(b, h, q_idx, kv_idx):
@@ -93,12 +90,12 @@ class ParticleNetwork(nn.Module):
             attn_mask_ctxt = ctxt_mask
             attn_mask_fs = fs_mask
         with self.context_manager:
-            fs_embd, _ = self.encoder(
-                seq_a=fs_embd,
-                seq_b=ctxt_embd,
+            _, fs_embd = self.encoder(
+                seq_a=ctxt_embd,
+                seq_b=fs_embd,
                 ctxt=global_embd,
-                mask_a=attn_mask_fs,
-                mask_b=attn_mask_ctxt,
+                mask_a=attn_mask_ctxt,
+                mask_b=attn_mask_fs,
             )
 
         fs_out = self.fs_out_net(fs_embd, ctxt=global_embd)

@@ -59,9 +59,9 @@ class TimestepEmbedder(nn.Module):
 
     def __init__(
         self,
-        hidden_dim,
-        frequency_embedding_size=256,
-        max_period=10000,
+        hidden_dim: int,
+        frequency_embedding_size: int = 256,
+        max_period: int = 10000,
         time_factor: float = 1,
     ):
         super().__init__()

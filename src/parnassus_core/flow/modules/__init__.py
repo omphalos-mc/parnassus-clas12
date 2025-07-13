@@ -5,14 +5,14 @@ from .embedding import (
     GlobalContextEmbedding,
     FourierBase2Embedding,
 )
-from .transformer import CATransformer
+from .transformer import DiTEncoder
 
 __all__ = [
     "MLPBlock",
     "DenseNetwork",
     "NamedNetwork",
     "TimestepEmbedder",
-    "CATransformer",
+    "DiTEncoder",
     "PositionalEmbedding",
     "GlobalContextEmbedding",
     "FourierBase2Embedding",

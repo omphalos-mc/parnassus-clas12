@@ -302,13 +302,13 @@ def main():
     config["log_dir"] = log_dir_timestamp
     if not args.test_run:
         os.makedirs(log_dir_timestamp, exist_ok=True)
-        scale_dict_path = config["data"]["scale_dict_path"]
+        scale_dict = config["data"]["scale_dict"]
         shutil.copyfile(
-            scale_dict_path,
-            os.path.join(log_dir_timestamp, scale_dict_path.split("/")[-1]),
+            scale_dict,
+            os.path.join(log_dir_timestamp, scale_dict.split("/")[-1]),
         )
-        config["data"]["scale_dict_path"] = os.path.join(
-            log_dir_timestamp, scale_dict_path.split("/")[-1]
+        config["data"]["scale_dict"] = os.path.join(
+            log_dir_timestamp, scale_dict.split("/")[-1]
         )
         with open(os.path.join(log_dir_timestamp, "config.yaml"), "w") as file:
             yaml.dump(config, file)

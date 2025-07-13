@@ -3,39 +3,32 @@ import torch.nn as nn
 
 
 from parnassus_core.flow.modules import (
-    TimestepEmbedder,
-    DenseNetwork,
-    MLPBlock,
     NamedNetwork,
-    GlobalContextEmbedding,
 )
 
 
 class EventNetwork(nn.Module):
-    def __init__(self, config):
+    def __init__(
+        self,
+        time_embedding: nn.Module,
+        fs_init_net: nn.Module,
+        ctxt_networks: nn.ModuleList,
+        global_embedding: nn.Module,
+        encoder: nn.Module,
+        fs_out_net: nn.Module,
+    ):
         super().__init__()
-        self.config = config
+        self.time_shape = (-1, 1)  # (batch_size, 1)
 
-        self.time_embedding = TimestepEmbedder(**config["time_embedding"])
+        self.time_embedding = time_embedding
+        self.fs_init_net = fs_init_net
+        self.ctxt_networks = ctxt_networks
+        self.global_embedding = global_embedding
+        self.encoder = encoder
+        self.fs_out_net = fs_out_net
 
-        self.fs_init_net = DenseNetwork(**config["fs_init_net"])
-
-        self.ctxt_networks = nn.ModuleList()
-        for net_config in config["ctxt_networks"]:
-            self.ctxt_networks.append(NamedNetwork(**net_config))
-
-        self.global_embedding = GlobalContextEmbedding(
-            input_names=config["global_embedding"]["input_names"]
-        )
-        self.encoder = nn.Sequential(
-            *[
-                MLPBlock(**config["encoder"]["net_kwargs"])
-                for _ in range(config["encoder"]["num_layers"])
-            ]
-        )
-        hidden_dim = config["fs_init_net"]["output_dim"]
-        global_embd_dim = len(config["global_embedding"]["input_names"]) * hidden_dim
-        self.fs_out_net = DenseNetwork(**config["fs_out_net"], ctxt_dim=global_embd_dim)
+        hidden_dim = self.time_embedding.hidden_dim
+        global_embd_dim = len(self.global_embedding.input_names) * hidden_dim
         self.adaLN_modulation = nn.Sequential(
             nn.SiLU(),
             nn.Linear(global_embd_dim, hidden_dim * 2, bias=True),

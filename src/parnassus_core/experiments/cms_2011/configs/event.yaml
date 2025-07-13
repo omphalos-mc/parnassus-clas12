@@ -1,0 +1,97 @@
+name: FM_Event_Test
+
+trainer:
+  callbacks:
+    - class_path: parnassus_core.flow.callbacks.Checkpoint
+      init_args:
+        monitor: val/loss
+        save_last: true
+        every_n_train_steps: 1000
+    - class_path: parnassus_core.flow.callbacks.EventPerformanceLogger
+    - class_path: lightning.pytorch.callbacks.ModelSummary
+      init_args:
+        max_depth: 2
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+    - class_path: lightning.pytorch.callbacks.TQDMProgressBar
+      init_args:
+        refresh_rate: 50
+
+data:
+  train_type: event
+  num_train: 2000
+  num_valid: 2000
+
+  scale_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/configs/var_transform.yaml
+  var_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/configs/event_vars.yaml
+
+model:
+  loss:
+    class_path: parnassus_core.flow.utils.MSEAndDirectionLoss
+
+  fm:
+    class_path: parnassus_core.flow.utils.FlowMatcher
+    init_args:
+      sigma: 0.0001
+      flow_type: fm
+
+  sampler_type: euler
+  n_steps: 25
+
+  model:
+    class_path: parnassus_core.flow.models.EventNetwork
+    init_args:
+      time_embedding:
+        class_path: parnassus_core.flow.modules.TimestepEmbedder
+        init_args:
+          hidden_dim: &dim 128
+          time_factor: 1000
+      fs_init_net:
+        class_path: parnassus_core.flow.modules.DenseNetwork
+        init_args:
+          input_dim: 4
+          hidden_dim: &dim2 256
+          output_dim: *dim
+          act_h: &act GELU
+      ctxt_networks:
+        class_path: torch.nn.ModuleList
+        init_args:
+          modules:
+            - class_path: parnassus_core.flow.modules.NamedNetwork
+              init_args:
+                input_name: ctxt
+                fields: ["data"]
+                dense_kwargs:
+                  input_dim: 12
+                  hidden_dim: *dim2
+                  output_dim: *dim
+                  act_h: *act
+            - class_path: parnassus_core.flow.modules.NamedNetwork
+              init_args:
+                input_name: ctxt_global
+                fields: ["data"]
+                dense_kwargs:
+                  input_dim: 4
+                  hidden_dim: *dim2
+                  output_dim: *dim
+                  act_h: *act
+      global_embedding:
+        class_path: parnassus_core.flow.modules.GlobalContextEmbedding
+        init_args:
+          input_names: ["ctxt", "ctxt_global", "time"]
+      encoder:
+        class_path: parnassus_core.flow.modules.DenseNetwork
+        init_args:
+          input_dim: *dim
+          output_dim: *dim
+          num_blocks: 2
+          n_lyr_pbk: 3
+          do_res: True
+          layer_scale: True
+          pre_norm: LayerNorm
+      fs_out_net:
+        class_path: parnassus_core.flow.modules.DenseNetwork
+        init_args:
+          input_dim: *dim
+          hidden_dim: *dim
+          output_dim: 4
+          ctxt_dim: 384
