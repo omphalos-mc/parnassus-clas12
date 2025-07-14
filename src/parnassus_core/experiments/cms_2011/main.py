@@ -1,7 +1,7 @@
 """Top level training script, powered by the lightning CLI."""
 
 import pathlib
-import comet_ml
+import comet_ml  # noqa: F401
 from lightning.pytorch.cli import ArgsType
 
 from parnassus_core.experiments.cms_2011.dataset import CMSDataModule

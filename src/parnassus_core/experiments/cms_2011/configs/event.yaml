@@ -82,10 +82,12 @@ model:
         class_path: parnassus_core.flow.modules.DenseNetwork
         init_args:
           input_dim: *dim
+          hidden_dim: *dim
           output_dim: *dim
           num_blocks: 2
           n_lyr_pbk: 3
           do_res: True
+          do_out: False
           layer_scale: True
           pre_norm: LayerNorm
       fs_out_net:

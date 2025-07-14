@@ -1,19 +1,19 @@
+import copy
+
+import matplotlib as mpl
 import numpy as np
+import pandas as pd
+import seaborn as sns
 import torch
 from lightning import Callback, LightningModule, Trainer
-import matplotlib as mpl
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from sklearn.metrics import confusion_matrix
 
 mpl.use("Agg")
 import matplotlib.pyplot as plt
 
 plt.style.use("seaborn-v0_8-whitegrid")
-import copy
-
-from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-import seaborn as sns
-import pandas as pd
-from sklearn.metrics import confusion_matrix
 
 
 def normalize_phi(inp):
@@ -132,7 +132,7 @@ class PerformanceLogger(Callback):
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
         pf_data, ctxt_dict = batch
-        fs_mask = ctxt_dict["fs_mask"]
+        # fs_mask = ctxt_dict["fs_mask"]
         return_dict = {}
         with torch.no_grad():
             fs_data = pl_module.sample(

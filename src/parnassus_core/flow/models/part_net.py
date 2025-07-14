@@ -1,7 +1,7 @@
 from contextlib import nullcontext
+
 import torch
 import torch.nn as nn
-
 from torch.nn.attention.flex_attention import create_block_mask
 
 from parnassus_core.flow.modules import (
@@ -90,12 +90,12 @@ class ParticleNetwork(nn.Module):
             attn_mask_ctxt = ctxt_mask
             attn_mask_fs = fs_mask
         with self.context_manager:
-            _, fs_embd = self.encoder(
-                seq_a=ctxt_embd,
-                seq_b=fs_embd,
+            fs_embd, _ = self.encoder(
+                seq_a=fs_embd,
+                seq_b=ctxt_embd,
                 ctxt=global_embd,
-                mask_a=attn_mask_ctxt,
-                mask_b=attn_mask_fs,
+                mask_a=attn_mask_fs,
+                mask_b=attn_mask_ctxt,
             )
 
         fs_out = self.fs_out_net(fs_embd, ctxt=global_embd)
