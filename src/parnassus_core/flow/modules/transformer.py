@@ -210,7 +210,7 @@ class DiTEncoder(nn.Module):
         mha_config: dict = None,
         mlp_ratio: float = 4.0,
         ctxt_ratio: float = 3.0,
-        attn_type: str = "flex",
+        attn_type: str = "torch",
         do_selfattn: bool = False,
         bidirectional: bool = True,
     ):

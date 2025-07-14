@@ -112,6 +112,7 @@ class ImpactNetwork(nn.Module):
                     _compile=True,
                 )
             else:
+                attn_mask_fs = fs_mask
                 attn_mask_ctxt = ctxt_mask
             with self.context_manager:
                 fs_embd, _ = self.encoder(

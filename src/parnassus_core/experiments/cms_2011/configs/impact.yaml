@@ -1,4 +1,4 @@
-name: FM_Impact_Test
+name: FM_Impact_Test_Self
 
 trainer:
   callbacks:
@@ -14,6 +14,9 @@ trainer:
     - class_path: lightning.pytorch.callbacks.TQDMProgressBar
       init_args:
         refresh_rate: 50
+    - class_path: lightning.pytorch.callbacks.StochasticWeightAveraging
+      init_args:
+        swa_lrs: 3e-5
 
 data:
   train_type: particle
@@ -26,6 +29,17 @@ data:
   var_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/configs/impact_vars.yaml
 
 model:
+  optimizer: Lion
+  optimizer_kwargs:
+    lr: 3e-5
+    weight_decay: 0.01
+
+  lrs_config:
+    skip_scheduler: false
+    lr_scheduler_type: cosine
+    lr_scheduler_kwargs:
+      gamma: 0.5
+
   loss:
     class_path: parnassus_core.flow.utils.MSEAndDirectionLoss
 
@@ -101,6 +115,7 @@ model:
           num_layers: 2
           ctxt_ratio: 2
           bidirectional: false
+          do_selfattn: true
           attn_type: flex
           mha_config:
             qk_norm: true
