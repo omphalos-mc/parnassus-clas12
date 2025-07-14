@@ -236,6 +236,7 @@ class DenseNetwork(nn.Module):
             input_dim=self.input_dim,
             output_dim=self.hidden_dim[0],
             ctxt_dim=self.ctxt_dim if ctxt_in_input else 0,
+            n_layers=n_lyr_pbk,
             act=act_h,
             norm=norm,
             dropout=dropout,
