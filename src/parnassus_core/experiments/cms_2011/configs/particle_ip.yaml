@@ -20,7 +20,6 @@ trainer:
 
 data:
   train_type: particle
-  fs_mask_type: charged
 
   num_train: 2_800_000
   num_valid: 35_000

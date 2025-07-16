@@ -249,21 +249,32 @@ class PerformanceLogger(Callback):
 
     def unscale_variables(self, data_dict):
         new_data_dict = {}
-        for i, var in enumerate(self.ctxt_global_vars):
-            if var.startswith("truth_") or var.startswith("ntruth"):
+        var_idx = 0
+        for var in self.ctxt_global_vars:
+            if var == 'means':
+                var_idx += len(
+                    [
+                        el
+                        for el in self.ctxt_vars
+                        if (el.startswith("truth_") and "class" not in el)
+                    ]
+                )
+            elif var.startswith("truth_") or var.startswith("ntruth"):
                 var = var.replace("truth_", "").replace("ntruth", "npart")
                 new_data_dict[f"tr_{var}"] = (
                     self.feature_scaler[var]
-                    .inverse_transform(data_dict["ctxt_global_data"][..., i])
+                    .inverse_transform(data_dict["ctxt_global_data"][..., var_idx])
                     .numpy()
                 )
+                var_idx += 1
             elif var.startswith("pflow_"):
                 var = var.replace("pflow_", "")
                 new_data_dict[f"pf_{var}"] = (
                     self.feature_scaler[var]
-                    .inverse_transform(data_dict["ctxt_global_data"][..., i])
+                    .inverse_transform(data_dict["ctxt_global_data"][..., var_idx])
                     .numpy()
                 )
+                var_idx += 1
         var_idx = 0
         for var in self.ctxt_vars:
             if var.startswith("pflow_"):
