@@ -1,4 +1,4 @@
-name: FM_Particle_Test
+name: cms2011_particle_rcfm_MSEDir_Deep5M_Flash
 
 trainer:
   callbacks:
@@ -6,7 +6,6 @@ trainer:
       init_args:
         monitor: val/loss
         save_last: true
-        every_n_train_steps: 1000
     - class_path: parnassus_core.flow.callbacks.ParticlePerformanceLogger
     - class_path: lightning.pytorch.callbacks.ModelSummary
       init_args:
@@ -15,16 +14,32 @@ trainer:
     - class_path: lightning.pytorch.callbacks.TQDMProgressBar
       init_args:
         refresh_rate: 50
+    - class_path: lightning.pytorch.callbacks.StochasticWeightAveraging
+      init_args:
+        swa_lrs: 3e-5
 
 data:
   train_type: particle
-  num_train: 2000
-  num_valid: 2000
+  fs_mask_type: charged
+
+  num_train: 2_800_000
+  num_valid: 35_000
 
   scale_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/configs/var_transform.yaml
   var_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/configs/particle_vars.yaml
 
 model:
+  optimizer: Lion
+  optimizer_kwargs:
+    lr: 3e-5
+    weight_decay: 0.01
+
+  lrs_config:
+    skip_scheduler: false
+    lr_scheduler_type: cosine
+    lr_scheduler_kwargs:
+      gamma: 0.5
+
   loss:
     class_path: parnassus_core.flow.utils.MSEAndDirectionLoss
 
@@ -51,7 +66,7 @@ model:
           input_dim: 12
           hidden_dim: [*dim, *dim]
           output_dim: *dim
-          act_h: SiLU
+          act_h: &act SiLU
       ctxt_networks:
         class_path: torch.nn.ModuleList
         init_args:
@@ -64,16 +79,16 @@ model:
                   input_dim: 12
                   hidden_dim: [*dim, *dim]
                   output_dim: *dim
-                  act_h: SiLU
+                  act_h: *act
             - class_path: parnassus_core.flow.modules.NamedNetwork
               init_args:
                 input_name: ctxt_global
                 fields: ["data"]
                 dense_kwargs:
-                  input_dim: 8
+                  input_dim: 14
                   hidden_dim: [*dim, *dim]
                   output_dim: *dim
-                  act_h: SiLU
+                  act_h: *act
       global_embedding:
         class_path: parnassus_core.flow.modules.GlobalContextEmbedding
         init_args:
@@ -85,6 +100,8 @@ model:
           num_heads: 6
           num_layers: 8
           attn_type: flash-varlen
+          bidirectional: true
+          do_selfattn: false
           mha_config:
             qk_norm: true
             bias: false
@@ -92,5 +109,7 @@ model:
         class_path: parnassus_core.flow.modules.DenseNetwork
         init_args:
           input_dim: *dim
-          hidden_dim: [*dim, *dim]
+          hidden_dim: [*dim, *dim, *dim]
           output_dim: 12
+          act_h: *act
+          ctxt_dim: 288

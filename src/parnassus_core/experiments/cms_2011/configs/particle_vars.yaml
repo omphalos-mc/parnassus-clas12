@@ -35,6 +35,7 @@ ctxt_vars:
   - truth_class
 
 ctxt_global_vars:
+  - means
   - truth_ht
   - truth_met_x
   - truth_met_y

@@ -29,7 +29,7 @@ def _add_hist2d(fig, ax, pf_data, fs_data, bins, cmap):
     fig.colorbar(im, cax=cax, orientation="vertical")
 
 
-def _add_to_hist(ax, data, bins, label, histtype="step", **kwargs):
+def _add_hist_1d(ax, data, bins, label, histtype="step", **kwargs):
     ax.hist(
         data,
         bins=bins,
@@ -38,14 +38,52 @@ def _add_to_hist(ax, data, bins, label, histtype="step", **kwargs):
         **kwargs,
     )
 
+LOG_VARS = {
+    "ptrel", 
+    "vx",
+    "vy",
+    "vz",
+    "d0",
+    "d0Error",
+    "d0Sig",
+    "z0",
+    "z0Error",
+    "z0Sig",
+}
 
-BINS_2D_DICT = {
+PARTICLE_BINS_DICT = {
+    # Particle variables
     "ptrel": np.linspace(0, 1, 100),
     "eta": np.linspace(-3, 3, 100),
     "phi": np.linspace(-np.pi, np.pi, 100),
     "vx": np.linspace(-2, 2, 50),
     "vy": np.linspace(-2, 2, 50),
     "vz": np.linspace(-20, 20, 50),
+}
+
+EVENT_BINS_DICT = {
+    "ht": np.linspace(0, 3000, 100),
+    "met_x": np.linspace(-100, 100, 100),
+    "met_y": np.linspace(-100, 100, 100),
+    "npart": np.linspace(0.5, 400.5, 100),
+}
+
+IMPACT_BINS_DICT = {
+    "d0": np.linspace(-0.5, 0.5, 50),
+    "d0Error": np.linspace(0, 1, 50),
+    "d0Sig": np.linspace(-2, 2, 50),
+    "z0": np.linspace(-0.5, 0.5, 50),
+    "z0Error": np.linspace(0, 2, 50),
+    "z0Sig": np.linspace(-2, 2, 50),
+}
+
+BINS_DICT = {
+    # Particle variables
+    **PARTICLE_BINS_DICT,
+    # Event variables
+    **EVENT_BINS_DICT,
+    # Impact parameters
+    **IMPACT_BINS_DICT,
 }
 
 VARIABLES_LABELS = {
@@ -190,6 +228,25 @@ class PerformanceLogger(Callback):
             self.is_setted_up = True
         self.validation_step_outputs.clear()
 
+    def extract_var(self, data, var_name, var_idx, sin_cos=False):
+        shift = 0
+        if var_name.endswith("phi") and sin_cos:
+            ctxt_ = torch.atan2(
+                data[..., var_idx],
+                data[..., var_idx + 1],
+            )
+            shift = 2
+        elif var_name.endswith("class"):
+            ctxt_ = data[..., var_idx : var_idx + 5].argmax(-1)
+            shift = 5
+        else:
+            ctxt_ = self.feature_scaler[var_name].inverse_transform(
+                data[..., var_idx]
+            )
+            shift = 1
+        return ctxt_, shift
+        
+
     def unscale_variables(self, data_dict):
         new_data_dict = {}
         for i, var in enumerate(self.ctxt_global_vars):
@@ -212,53 +269,56 @@ class PerformanceLogger(Callback):
             if var.startswith("pflow_"):
                 continue
             var_name = var.replace("truth_", "")
-            if var_name.endswith("phi") and self.sin_cos:
-                ctxt_ = torch.atan2(
-                    data_dict["ctxt_data"][..., var_idx],
-                    data_dict["ctxt_data"][..., var_idx + 1],
-                )
-                var_idx += 2
-            elif var.endswith("class"):
-                ctxt_ = data_dict["ctxt_data"][..., var_idx : var_idx + 5].argmax(-1)
-                var_idx += 5
-            else:
-                ctxt_ = self.feature_scaler[var_name].inverse_transform(
-                    data_dict["ctxt_data"][..., var_idx]
-                )
-                var_idx += 1
+            ctxt_, shift = self.extract_var(
+                data_dict["ctxt_data"], var_name, var_idx, self.sin_cos
+            )
+            var_idx += shift
             new_data_dict[f"tr_{var_name}"] = ctxt_.numpy()
         var_idx = 0
         for var in self.fs_vars:
             var_name = var.replace("pflow_", "").replace("npflow", "npart")
-            if var.endswith("phi") and self.sin_cos:
-                fs_ = torch.atan2(
-                    data_dict["fs_data"][..., var_idx],
-                    data_dict["fs_data"][..., var_idx + 1],
-                )
-                pf_ = torch.atan2(
-                    data_dict["pf_data"][..., var_idx],
-                    data_dict["pf_data"][..., var_idx + 1],
-                )
-                var_idx += 2
-            elif var.endswith("class"):
-                fs_ = data_dict["fs_data"][..., var_idx : var_idx + 5].argmax(-1)
-                pf_ = data_dict["pf_data"][..., var_idx : var_idx + 5].argmax(-1)
-                var_idx += 5
-            else:
-                fs_ = self.feature_scaler[var_name].inverse_transform(
-                    data_dict["fs_data"][..., var_idx]
-                )
-                pf_ = self.feature_scaler[var_name].inverse_transform(
-                    data_dict["pf_data"][..., var_idx]
-                )
-                var_idx += 1
-            new_data_dict[f"fs_{var_name}"] = fs_.numpy()
+            pf_, _ = self.extract_var(
+                data_dict["pf_data"], var_name, var_idx, self.sin_cos
+            )
+            fs_, shift = self.extract_var(
+                data_dict["fs_data"], var_name, var_idx, self.sin_cos
+            )
+            var_idx += shift
             new_data_dict[f"pf_{var_name}"] = pf_.numpy()
+            new_data_dict[f"fs_{var_name}"] = fs_.numpy()
         if "ctxt_mask" in data_dict:
             new_data_dict["ctxt_mask"] = data_dict["ctxt_mask"].numpy()
         if "fs_mask" in data_dict:
             new_data_dict["fs_mask"] = data_dict["fs_mask"].numpy()
         return new_data_dict
+    
+    def update_impact_vars(self, plot_dict: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        for var in IMPACT_BINS_DICT.keys():
+            if f"pf_{var}" not in plot_dict:
+                if var in {"d0", "z0"}:
+                    plot_dict[f"pf_{var}"] = (
+                        plot_dict[f"pf_{var}Sig"] * plot_dict[f"pf_{var}Error"]
+                    )
+                    plot_dict[f"fs_{var}"] = (
+                        plot_dict[f"fs_{var}Sig"] * plot_dict[f"fs_{var}Error"]
+                    )
+                elif var in {"d0Error", "z0Error"}:
+                    var_ = var.replace("Error", "")
+                    plot_dict[f"pf_{var}"] = (
+                        plot_dict[f"pf_{var_}"] / plot_dict[f"pf_{var_}Sig"]
+                    )
+                    plot_dict[f"fs_{var}"] = (
+                        plot_dict[f"fs_{var_}"] / plot_dict[f"fs_{var_}Sig"]
+                    )
+                elif var in {"d0Sig", "z0Sig"}:
+                    var_ = var.replace("Sig", "")
+                    plot_dict[f"pf_{var}"] = (
+                        plot_dict[f"pf_{var_}"] / plot_dict[f"pf_{var_}Error"]
+                    )
+                    plot_dict[f"fs_{var}"] = (
+                        plot_dict[f"fs_{var_}"] / plot_dict[f"fs_{var_}Error"]
+                    )
+        return plot_dict
 
     def plot_data(self, pl_module: LightningModule, plot_dict: dict[str, np.ndarray]):
         pass
@@ -266,8 +326,18 @@ class PerformanceLogger(Callback):
 
 class ParticlePerformanceLogger(PerformanceLogger):
     def plot_data(self, pl_module, plot_dict):
+        bins_dict = PARTICLE_BINS_DICT.copy()
+
+        # If we have impact parameters, update the bins_dict
+        if "pf_d0" in plot_dict or "pf_d0Error" in plot_dict:
+            plot_dict = self.update_impact_vars(plot_dict)
+            bins_dict.update(IMPACT_BINS_DICT.copy())
+        NUM_ADDITIONAL_PLOTS = 6 
+        num_plots = len(bins_dict) + NUM_ADDITIONAL_PLOTS - 1 # Remove class plot, since it's already in NUM_ADDITIONAL_PLOTS
+        num_cols = 6
+        num_rows = num_plots // num_cols + (num_plots % num_cols > 0)
         fig, axs = subplots_with_absolute_sized_axes(
-            4, 3, figsize=(4 * 4, 20), axis_width=4, axis_height=4, dpi=200
+            num_rows, num_cols, figsize=(num_cols * 5, num_rows * 5), axis_width=4, axis_height=4, dpi=200
         )
         axs = axs.flatten()
         canvas = FigureCanvas(fig)
@@ -278,18 +348,28 @@ class ParticlePerformanceLogger(PerformanceLogger):
 
         cmap = copy.copy(plt.get_cmap("PuRd"))
         cmap.set_under("white")
-        for i, (var, bins) in enumerate(BINS_2D_DICT.items()):
-            axs[i].set_title(f"{VARIABLES_LABELS[var]} 2D")
-            axs[i].set_xlabel("Pflow")
-            axs[i].set_ylabel("FastSim")
-            _add_hist2d(
-                fig,
+
+        for i, (var, bins) in enumerate(bins_dict.items()):
+            axs[i].set_title(f"{VARIABLES_LABELS[var]}")
+            _add_hist_1d(
                 axs[i],
                 plot_dict[f"pf_{var}"][pf_mask],
+                bins=bins,
+                histtype="stepfilled",
+                label="PF",
+                alpha=0.5,
+            )
+            _add_hist_1d(
+                axs[i],
                 plot_dict[f"fs_{var}"][pf_mask],
                 bins=bins,
-                cmap=cmap,
+                histtype="step",
+                label="FS",
             )
+            if var in LOG_VARS:
+                axs[i].set_yscale("log")
+            axs[i].legend()
+
         i += 1
         cm = confusion_matrix(
             plot_dict["pf_class"][pf_mask],
@@ -334,35 +414,35 @@ class ParticlePerformanceLogger(PerformanceLogger):
         fs_ht = fs_pt.sum(-1).flatten()
         bins = np.linspace(0, 3000, 100)
 
-        _add_to_hist(axs[i], pf_ht, bins, "pf", histtype="stepfilled", alpha=0.5)
-        _add_to_hist(axs[i], tr_ht, bins, "Truth")
-        _add_to_hist(axs[i], fs_ht, bins, "FastSim")
+        _add_hist_1d(axs[i], pf_ht, bins, "PF", histtype="stepfilled", alpha=0.5)
+        _add_hist_1d(axs[i], tr_ht, bins, "TR")
+        _add_hist_1d(axs[i], fs_ht, bins, "FS")
         axs[i].set_title("Jet pT")
         axs[i].legend()
 
         bins = np.linspace(-200, 200, 100)
-        _add_to_hist(
+        _add_hist_1d(
             axs[i + 1],
             pf_ht - tr_ht,
             bins,
-            "pf",
+            "PF",
             histtype="stepfilled",
             alpha=0.5,
         )
-        _add_to_hist(axs[i + 1], fs_ht - tr_ht, bins, "FastSim")
+        _add_hist_1d(axs[i + 1], fs_ht - tr_ht, bins, "FS")
         axs[i + 1].set_title("Jet pT Residual")
         axs[i + 1].legend()
 
         bins = np.linspace(-100, 100, 100)
-        _add_to_hist(axs[i + 2], pf_met_x, bins, "pf", histtype="stepfilled", alpha=0.5)
-        _add_to_hist(axs[i + 2], tr_met_x, bins, "Truth")
-        _add_to_hist(axs[i + 2], fs_met_x, bins, "FastSim")
+        _add_hist_1d(axs[i + 2], pf_met_x, bins, "PF", histtype="stepfilled", alpha=0.5)
+        _add_hist_1d(axs[i + 2], tr_met_x, bins, "TR")
+        _add_hist_1d(axs[i + 2], fs_met_x, bins, "FS")
         axs[i + 2].set_title("MET x")
         axs[i + 2].legend()
 
-        _add_to_hist(axs[i + 3], pf_met_y, bins, "pf", histtype="stepfilled", alpha=0.5)
-        _add_to_hist(axs[i + 3], tr_met_y, bins, "Truth")
-        _add_to_hist(axs[i + 3], fs_met_y, bins, "FastSim")
+        _add_hist_1d(axs[i + 3], pf_met_y, bins, "PF", histtype="stepfilled", alpha=0.5)
+        _add_hist_1d(axs[i + 3], tr_met_y, bins, "TR")
+        _add_hist_1d(axs[i + 3], fs_met_y, bins, "FS")
         axs[i + 3].set_title("MET y")
         axs[i + 3].legend()
 
@@ -371,7 +451,7 @@ class ParticlePerformanceLogger(PerformanceLogger):
             plot_dict["pf_class"][pf_mask],
             bins=class_bins,
             histtype="stepfilled",
-            label="pf",
+            label="PF",
             density=True,
             alpha=0.5,
         )
@@ -379,7 +459,7 @@ class ParticlePerformanceLogger(PerformanceLogger):
             plot_dict["fs_class"][pf_mask],
             bins=class_bins,
             histtype="step",
-            label="FastSim",
+            label="FS",
             density=True,
         )
         axs[i + 4].set_xticks(np.arange(5), ["Ch had", "El", "Mu", "Neut had", "Phot"])
@@ -422,12 +502,6 @@ class EventPerformanceLogger(PerformanceLogger):
         cmap = copy.copy(plt.get_cmap("PuRd"))
         cmap.set_under("white")
 
-        bins = {
-            "ht": np.linspace(0, 3000, 100),
-            "met_x": np.linspace(-100, 100, 100),
-            "met_y": np.linspace(-100, 100, 100),
-            "npart": np.linspace(0.5, 400.5, 100),
-        }
         res_bins = {
             "ht": np.linspace(-2, 1, 50),
             "npart": np.linspace(-250, 150, 50),
@@ -435,24 +509,24 @@ class EventPerformanceLogger(PerformanceLogger):
             "met_y": np.linspace(-100, 100, 50),
         }
         for i, var in enumerate(["ht", "met_x", "met_y", "npart"]):
-            _add_to_hist(
+            _add_hist_1d(
                 axs[i][0],
                 plot_dict[f"pf_{var}"],
-                bins=bins[var],
+                bins=EVENT_BINS_DICT[var],
                 label="PF",
                 histtype="stepfilled",
             )
-            _add_to_hist(
+            _add_hist_1d(
                 axs[i][0],
                 plot_dict[f"fs_{var}"],
-                bins=bins[var],
+                bins=EVENT_BINS_DICT[var],
                 label="FS",
                 histtype="step",
             )
-            _add_to_hist(
+            _add_hist_1d(
                 axs[i][0],
                 plot_dict[f"tr_{var}"],
-                bins=bins[var],
+                bins=EVENT_BINS_DICT[var],
                 label="TR",
                 histtype="step",
                 color="k",
@@ -472,14 +546,14 @@ class EventPerformanceLogger(PerformanceLogger):
                 if i == 0
                 else plot_dict[f"fs_{var}"] - plot_dict[f"tr_{var}"]
             )
-            _add_to_hist(
+            _add_hist_1d(
                 axs[i][1],
                 pf_res,
                 bins=res_bins[var],
                 label="PF-TR",
                 histtype="stepfilled",
             )
-            _add_to_hist(
+            _add_hist_1d(
                 axs[i][1], fs_res, bins=res_bins[var], label="FS-TR", histtype="step"
             )
             axs[i][1].set_title(f"{VARIABLES_LABELS[var]} Residuals")
@@ -518,16 +592,7 @@ class ImpactPerformanceLogger(PerformanceLogger):
 
         cmap = copy.copy(plt.get_cmap("PuRd"))
         cmap.set_under("white")
-
-        bins_dict = {
-            "d0": np.linspace(-0.5, 0.5, 50),
-            "d0Error": np.linspace(0, 1, 50),
-            "d0Sig": np.linspace(-2, 2, 50),
-            "z0": np.linspace(-0.5, 0.5, 50),
-            "z0Error": np.linspace(0, 2, 50),
-            "z0Sig": np.linspace(-2, 2, 50),
-        }
-
+        
         pf_mask = plot_dict["fs_mask"].astype(bool)
         for key, val in plot_dict.items():
             if (
@@ -536,44 +601,21 @@ class ImpactPerformanceLogger(PerformanceLogger):
                 and val.ndim == 2
             ):
                 plot_dict[key] = val[pf_mask]
-        for i, var in enumerate(bins_dict.keys()):
-            if f"pf_{var}" not in plot_dict:
-                if var in {"d0", "z0"}:
-                    plot_dict[f"pf_{var}"] = (
-                        plot_dict[f"pf_{var}Sig"] * plot_dict[f"pf_{var}Error"]
-                    )
-                    plot_dict[f"fs_{var}"] = (
-                        plot_dict[f"fs_{var}Sig"] * plot_dict[f"fs_{var}Error"]
-                    )
-                elif var in {"d0Error", "z0Error"}:
-                    var_ = var.replace("Error", "")
-                    plot_dict[f"pf_{var}"] = (
-                        plot_dict[f"pf_{var_}"] / plot_dict[f"pf_{var_}Sig"]
-                    )
-                    plot_dict[f"fs_{var}"] = (
-                        plot_dict[f"fs_{var_}"] / plot_dict[f"fs_{var_}Sig"]
-                    )
-                elif var in {"d0Sig", "z0Sig"}:
-                    var_ = var.replace("Sig", "")
-                    plot_dict[f"pf_{var}"] = (
-                        plot_dict[f"pf_{var_}"] / plot_dict[f"pf_{var_}Error"]
-                    )
-                    plot_dict[f"fs_{var}"] = (
-                        plot_dict[f"fs_{var_}"] / plot_dict[f"fs_{var_}Error"]
-                    )
-            _add_to_hist(
+        plot_dict = self.update_impact_vars(plot_dict)
+        for i, (var, bins) in enumerate(IMPACT_BINS_DICT.items()):
+            _add_hist_1d(
                 axs[i],
                 plot_dict[f"pf_{var}"],
-                bins=bins_dict[var],
+                bins=bins,
                 label="PF",
                 histtype="stepfilled",
                 color="blue",
                 alpha=0.5,
             )
-            _add_to_hist(
+            _add_hist_1d(
                 axs[i],
                 plot_dict[f"fs_{var}"],
-                bins=bins_dict[var],
+                bins=bins,
                 label="FS",
                 histtype="step",
                 color="red",
@@ -581,7 +623,8 @@ class ImpactPerformanceLogger(PerformanceLogger):
             axs[i].set_xlabel(VARIABLES_LABELS[var])
             axs[i].set_ylabel("Counts")
             axs[i].legend()
-            axs[i].set_yscale("log")
+            if var in LOG_VARS:
+                axs[i].set_yscale("log")
             axs[i].set_title(var)
         canvas.draw()
         w, h = fig.get_size_inches() * fig.get_dpi()

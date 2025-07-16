@@ -1,3 +1,5 @@
+seed_everything: 42
+
 data:
   num_workers: 6
 
