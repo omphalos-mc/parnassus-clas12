@@ -1,12 +1,13 @@
-name: FM_Event_Test
+name: cms2011_event_fm_MSE
 
 trainer:
+  max_epochs: 100
+
   callbacks:
     - class_path: parnassus_core.flow.callbacks.Checkpoint
       init_args:
         monitor: val/loss
         save_last: true
-        every_n_train_steps: 1000
     - class_path: parnassus_core.flow.callbacks.EventPerformanceLogger
     - class_path: lightning.pytorch.callbacks.ModelSummary
       init_args:
@@ -15,18 +16,36 @@ trainer:
     - class_path: lightning.pytorch.callbacks.TQDMProgressBar
       init_args:
         refresh_rate: 50
+    - class_path: lightning.pytorch.callbacks.StochasticWeightAveraging
+      init_args:
+        swa_lrs: 3e-5
 
 data:
+
   train_type: event
-  num_train: 2000
-  num_valid: 2000
+
+  num_train: 2_800_000
+  num_valid: 35_000
+  valid_batch_size: 5000
 
   scale_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/configs/var_transform.yaml
   var_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/configs/event_vars.yaml
 
 model:
+
+  optimizer: Lion
+  optimizer_kwargs:
+    lr: 3e-5
+    weight_decay: 0.01
+
+  lrs_config:
+    skip_scheduler: false
+    lr_scheduler_type: cosine
+    lr_scheduler_kwargs:
+      gamma: 0.8
+
   loss:
-    class_path: parnassus_core.flow.utils.MSEAndDirectionLoss
+    class_path: parnassus_core.flow.utils.MSELoss
 
   fm:
     class_path: parnassus_core.flow.utils.FlowMatcher
@@ -34,7 +53,7 @@ model:
       sigma: 0.0001
       flow_type: fm
 
-  sampler_type: euler
+  sampler_type: pndm
   n_steps: 25
 
   model:
@@ -70,7 +89,7 @@ model:
                 input_name: ctxt_global
                 fields: ["data"]
                 dense_kwargs:
-                  input_dim: 4
+                  input_dim: 10
                   hidden_dim: *dim2
                   output_dim: *dim
                   act_h: *act
@@ -84,12 +103,13 @@ model:
           input_dim: *dim
           hidden_dim: *dim
           output_dim: *dim
-          num_blocks: 2
+          num_blocks: 4
           n_lyr_pbk: 3
           do_res: True
           do_out: False
           layer_scale: True
           pre_norm: LayerNorm
+          skip_last_act: True
       fs_out_net:
         class_path: parnassus_core.flow.modules.DenseNetwork
         init_args:
@@ -97,3 +117,4 @@ model:
           hidden_dim: *dim
           output_dim: 4
           ctxt_dim: 384
+          act_h: *act

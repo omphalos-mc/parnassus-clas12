@@ -1,0 +1,21 @@
+
+model_configs:
+  scale_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/evaluation/var_transform.yaml
+  var_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/evaluation/eval_vars.yaml
+  event_model:
+    config_path: ""
+    ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/logs/cms2011_event_fm_MSE_20250719-T160224/ckpts/last.ckpt"
+    sampler_type: "euler"
+    n_steps: 50
+
+  particle_model:
+    config_path: ""
+    ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/logs/cms2011_particle_rcfm_MSEDir_Deep5M_Flex_20250716-T221618/ckpts/last.ckpt"
+    sampler_type: "dpm"
+    n_steps: 40
+
+  # impact_model:
+  #   config_path: ""
+  #   ckpt_path: ""
+  #   sampler_type: "euler"
+  #   n_steps: 25

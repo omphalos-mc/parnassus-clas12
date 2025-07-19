@@ -200,6 +200,7 @@ site/
 .cache
 pytest-temp
 /vendor
+*.root
 
 # NFS
 *.nfs*

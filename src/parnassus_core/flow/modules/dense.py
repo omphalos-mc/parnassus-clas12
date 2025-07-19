@@ -32,6 +32,7 @@ class MLPBlock(nn.Module):
         layer_scale: bool = False,
         pre_norm: str | None = None,
         init_zeros: bool = False,
+        skip_last_act: bool = False,
     ) -> None:
         """Init method for MLPBlock.
 
@@ -58,6 +59,11 @@ class MLPBlock(nn.Module):
         init_zeros : bool, optional,
             If the final layer weights and bias values are set to zero
             Does not apply to bayesian layers
+        pre_norm : str | None, optional
+            If the block is pre-normalised, i.e. normalisation is applied before the
+            linear transform, by default None
+        skip_last_act : bool, optional
+            If the last activation function should be skipped, by default False
         """
         super().__init__()
 
@@ -89,7 +95,7 @@ class MLPBlock(nn.Module):
                 self.block[-1].weight.data.fill_(0)
                 self.block[-1].bias.data.fill_(0)
 
-            if act is not None:
+            if act is not None and (not skip_last_act or n < n_layers - 1):
                 self.block.append(getattr(nn, act)())
             if norm is not None:
                 self.block.append(getattr(nn, norm)(output_dim))
@@ -156,6 +162,7 @@ class DenseNetwork(nn.Module):
         do_res: bool = False,
         layer_scale: bool = False,
         pre_norm: str | None = None,
+        skip_last_act: bool = False,
         ctxt_in_input: bool = True,
         ctxt_in_hidden: bool = False,
         output_init_zeros: bool = False,
@@ -197,6 +204,8 @@ class DenseNetwork(nn.Module):
             Use layer scale in the hidden blocks, by default False
         pre_norm : str | None, optional
             If the block is pre-normalised, by default None
+        skip_last_act : bool, optional
+            If the last activation function should be skipped, by default False
         ctxt_in_input : bool, optional
             Include the ctxt tensor in the input block, by default True
         ctxt_in_hidden : bool, optional
@@ -243,6 +252,7 @@ class DenseNetwork(nn.Module):
             do_res=do_res,
             layer_scale=layer_scale,
             pre_norm=pre_norm,
+            skip_last_act=skip_last_act,
         )
 
         # All hidden blocks as a single module list
@@ -262,6 +272,7 @@ class DenseNetwork(nn.Module):
                         do_res=do_res,
                         layer_scale=layer_scale,
                         pre_norm=pre_norm,
+                        skip_last_act=skip_last_act,
                     )
                 )
 

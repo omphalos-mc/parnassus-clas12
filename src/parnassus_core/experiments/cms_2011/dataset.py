@@ -171,7 +171,7 @@ class CMSDataset(Dataset):
                 self.scaled_ctxt_global_data.append(
                     self.feature_scaler["npart"].transform(self.n_truth_particles)
                 )
-            elif var == "npflow":
+            elif var == "npflow" and self.mode == "train":
                 self.scaled_ctxt_global_data.append(
                     self.feature_scaler["npart"].transform(self.n_pflow_particles)
                 )
@@ -436,6 +436,9 @@ class CMSDataset(Dataset):
             self.scaled_ctxt_global_data[idx]
         ).float()
         if self.mode == "eval":
+            ctxt_dict["eventNumber"] = self.full_data_array["eventNumber"][idx].to(
+                torch.int64
+            )
             return ctxt_dict
         if self.mode == "train":
             fs_data, fs_mask = self._get_fs_data(idx)

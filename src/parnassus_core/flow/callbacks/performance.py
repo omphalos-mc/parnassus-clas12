@@ -38,8 +38,9 @@ def _add_hist_1d(ax, data, bins, label, histtype="step", **kwargs):
         **kwargs,
     )
 
+
 LOG_VARS = {
-    "ptrel", 
+    "ptrel",
     "vx",
     "vy",
     "vz",
@@ -240,18 +241,15 @@ class PerformanceLogger(Callback):
             ctxt_ = data[..., var_idx : var_idx + 5].argmax(-1)
             shift = 5
         else:
-            ctxt_ = self.feature_scaler[var_name].inverse_transform(
-                data[..., var_idx]
-            )
+            ctxt_ = self.feature_scaler[var_name].inverse_transform(data[..., var_idx])
             shift = 1
         return ctxt_, shift
-        
 
     def unscale_variables(self, data_dict):
         new_data_dict = {}
         var_idx = 0
         for var in self.ctxt_global_vars:
-            if var == 'means':
+            if var == "means":
                 var_idx += len(
                     [
                         el
@@ -302,8 +300,10 @@ class PerformanceLogger(Callback):
         if "fs_mask" in data_dict:
             new_data_dict["fs_mask"] = data_dict["fs_mask"].numpy()
         return new_data_dict
-    
-    def update_impact_vars(self, plot_dict: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+
+    def update_impact_vars(
+        self, plot_dict: dict[str, np.ndarray]
+    ) -> dict[str, np.ndarray]:
         for var in IMPACT_BINS_DICT.keys():
             if f"pf_{var}" not in plot_dict:
                 if var in {"d0", "z0"}:
@@ -343,12 +343,19 @@ class ParticlePerformanceLogger(PerformanceLogger):
         if "pf_d0" in plot_dict or "pf_d0Error" in plot_dict:
             plot_dict = self.update_impact_vars(plot_dict)
             bins_dict.update(IMPACT_BINS_DICT.copy())
-        NUM_ADDITIONAL_PLOTS = 6 
-        num_plots = len(bins_dict) + NUM_ADDITIONAL_PLOTS - 1 # Remove class plot, since it's already in NUM_ADDITIONAL_PLOTS
+        NUM_ADDITIONAL_PLOTS = 6
+        num_plots = (
+            len(bins_dict) + NUM_ADDITIONAL_PLOTS - 1
+        )  # Remove class plot, since it's already in NUM_ADDITIONAL_PLOTS
         num_cols = 6
         num_rows = num_plots // num_cols + (num_plots % num_cols > 0)
         fig, axs = subplots_with_absolute_sized_axes(
-            num_rows, num_cols, figsize=(num_cols * 5, num_rows * 5), axis_width=4, axis_height=4, dpi=200
+            num_rows,
+            num_cols,
+            figsize=(num_cols * 5, num_rows * 5),
+            axis_width=4,
+            axis_height=4,
+            dpi=200,
         )
         axs = axs.flatten()
         canvas = FigureCanvas(fig)
@@ -576,7 +583,7 @@ class EventPerformanceLogger(PerformanceLogger):
             int(h), int(w), 3
         )
         fig.subplots_adjust(hspace=0.3, wspace=0.3)
-        plt.savefig(f"ED_{pl_module.current_epoch}.png")
+        plt.savefig(f"logs/figs/EVT_ED_{pl_module.current_epoch}.png")
         if pl_module.logger is not None:
             pl_module.logger.experiment.log_image(
                 image_data=image,
@@ -585,7 +592,7 @@ class EventPerformanceLogger(PerformanceLogger):
                 image_format="png",
             )
         else:
-            plt.savefig(f"ED_{pl_module.current_epoch}.png")
+            plt.savefig(f"logs/figs/EVT_ED_{pl_module.current_epoch}.png")
         plt.close(fig)
         return {
             var: np.mean((plot_dict[f"fs_{var}"] - plot_dict[f"pf_{var}"]) ** 2)
@@ -603,7 +610,7 @@ class ImpactPerformanceLogger(PerformanceLogger):
 
         cmap = copy.copy(plt.get_cmap("PuRd"))
         cmap.set_under("white")
-        
+
         pf_mask = plot_dict["fs_mask"].astype(bool)
         for key, val in plot_dict.items():
             if (

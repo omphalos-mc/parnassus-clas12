@@ -236,6 +236,7 @@ class Sampler(ABC):
         *,
         ctxt_dict,
         save_seq=False,
+        to_cpu=True,
         **kwargs,
     ):
         pass
@@ -251,6 +252,7 @@ class EulerSampler(Sampler):
         ctxt_dict,
         save_seq=False,
         init_fastsim: Optional[torch.Tensor] = None,
+        to_cpu=True,
         **kwargs,
     ):
         mask = ctxt_dict["fs_mask"]
@@ -277,7 +279,9 @@ class EulerSampler(Sampler):
         if save_seq:
             seq = torch.stack(seq)
             return fastsim.cpu(), seq
-        return fastsim.cpu()
+        if to_cpu:
+            return fastsim.cpu()
+        return fastsim
 
 
 class MidpointSampler(Sampler):
@@ -379,6 +383,7 @@ class PNDMSampler(Sampler):
         zero_init_padded=True,
         edm_config: dict | None = None,
         random_seed=None,
+        reverse_time=False,
         init_step="rk4",
     ):
         """
@@ -400,6 +405,7 @@ class PNDMSampler(Sampler):
             zero_init_padded=zero_init_padded,
             edm_config=edm_config,
             random_seed=random_seed,
+            reverse_time=reverse_time,
         )
 
         self.step_fn = {
@@ -408,7 +414,7 @@ class PNDMSampler(Sampler):
             "euler": self._step,
         }[self.init_step]
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def sample(
         self,
         model,
@@ -446,6 +452,7 @@ class PNDMSampler(Sampler):
                     t_next=t_next,
                     t_list=[t_cur, (t_cur + t_next) / 2, t_next],
                     is_last=(i == self.n_steps - 1),
+                    dt=t_next - t_cur,
                     ctxt_dict=ctxt_dict,
                 )
                 ets.append(deriv_prev)

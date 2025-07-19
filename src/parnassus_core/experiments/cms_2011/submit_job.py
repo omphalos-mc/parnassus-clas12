@@ -48,12 +48,16 @@ with open(run_script, "w") as f:
     f.write("IOTHROTTLE_LIMIT=0\n")
     f.write("export IOTHROTTLE_LIMIT=0\n")
     f.write("export IOTHROTTLE_VERBOSE=1\n")
-    f.write("source /usr/wipp/conda/24.5.0/bin/activate /usr/wipp/conda/24.5.0u/envs/common\n")
+    f.write(
+        "source /usr/wipp/conda/24.5.0/bin/activate /usr/wipp/conda/24.5.0u/envs/common\n"
+    )
     f.write(f"cd {top_dir}\n")
     f.write(f"python main.py fit -c {args.config}\n")
 
-command = f"qsub -o {log_file} -e {err_file} -N {name}" \
-          f" -l walltime={walltime},mem={mem},ncpus={ncpus},ngpus={ngpus},io=5"
+command = (
+    f"qsub -o {log_file} -e {err_file} -N {name}"
+    f" -l walltime={walltime},mem={mem},ncpus={ncpus},ngpus={ngpus},io=5"
+)
 if args.comet:
     command += f" -v COMET_EXP_ID={args.comet}"
 command += f" {run_script}"

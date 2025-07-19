@@ -5,7 +5,12 @@ import torch.nn as nn
 from lightning.pytorch import LightningModule
 
 from parnassus_core.flow.modules.optimizer import Lion, Muon
-from parnassus_core.flow.sampling import DPM_Solver, EulerSampler, NoiseScheduleFlow
+from parnassus_core.flow.sampling import (
+    DPM_Solver,
+    EulerSampler,
+    NoiseScheduleFlow,
+    PNDMSampler,
+)
 from parnassus_core.flow.utils.conditional_flow_matcher import FlowMatcher
 from parnassus_core.flow.utils.scheduler import (
     CosineAnnealingWarmupRestarts,
@@ -23,7 +28,7 @@ class FlowLightning(LightningModule):
         lrs_config: dict,
         optimizer_kwargs: dict,
         optimizer: Literal["AdamW", "Lion", "Muon"] = "AdamW",
-        sampler_type: Literal["euler", "dpm"] = "euler",
+        sampler_type: Literal["euler", "pndm", "dpm"] = "euler",
         n_steps: int = 25,
     ):
         super().__init__()
@@ -39,10 +44,21 @@ class FlowLightning(LightningModule):
 
         self.sampler_type = sampler_type
         self.n_steps = n_steps
+        self.change_sampler(sampler_type, n_steps)
 
+    def change_sampler(
+        self, sampler_type: Literal["euler", "pndm", "dpm"], n_steps: int = 25
+    ):
+        self.sampler_type = sampler_type
+        self.n_steps = n_steps
         if self.sampler_type == "euler":
             self.sampler = EulerSampler(
                 n_steps=self.n_steps, reverse_time=self.FM.flow_type == "rcfm"
+            )
+        elif self.sampler_type == "pndm":
+            self.sampler = PNDMSampler(
+                n_steps=self.n_steps,
+                reverse_time=self.FM.flow_type == "rcfm",
             )
         elif self.sampler_type == "dpm":
 
@@ -54,6 +70,7 @@ class FlowLightning(LightningModule):
             self.sampler = DPM_Solver(
                 model_fn=model_fn, noise_schedule=NoiseScheduleFlow()
             )
+        print(f"Using sampler: {self.sampler_type} with {self.n_steps} steps")
 
     def forward(self, data: tuple[torch.Tensor, dict[str, torch.Tensor]]):
         pf_data, ctxt_dict = data
@@ -68,14 +85,15 @@ class FlowLightning(LightningModule):
         return loss
 
     @torch.no_grad()
-    def sample(self, fs_shape, ctxt_dict, n_steps=None):
+    def sample(self, fs_shape, ctxt_dict, n_steps=None, to_cpu=True):
         if n_steps is None:
             n_steps = self.n_steps
-        if self.sampler_type == "euler":
+        if self.sampler_type != "dpm":
             return self.sampler.sample(
                 self.net,
                 pflow_shape=fs_shape,
                 ctxt_dict=ctxt_dict,
+                to_cpu=to_cpu,
             )
         elif self.sampler_type == "dpm":
             return self.sampler.sample(
