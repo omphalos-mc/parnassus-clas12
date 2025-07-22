@@ -33,7 +33,6 @@ class EventNetwork(nn.Module):
             nn.SiLU(),
             nn.Linear(global_embd_dim, hidden_dim * 2, bias=True),
         )
-        print(self)
 
     def forward(
         self,

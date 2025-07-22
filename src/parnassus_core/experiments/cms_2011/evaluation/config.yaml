@@ -1,21 +1,34 @@
+eval_path: evals
 
-model_configs:
-  scale_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/evaluation/var_transform.yaml
-  var_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/evaluation/eval_vars.yaml
-  event_model:
-    config_path: ""
-    ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/logs/cms2011_event_fm_MSE_20250719-T160224/ckpts/last.ckpt"
-    sampler_type: "euler"
-    n_steps: 50
+scale_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/evaluation/var_transform.yaml
+var_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/evaluation/eval_vars.yaml
 
-  particle_model:
-    config_path: ""
-    ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/logs/cms2011_particle_rcfm_MSEDir_Deep5M_Flex_20250716-T221618/ckpts/last.ckpt"
-    sampler_type: "dpm"
-    n_steps: 40
+event_model:
+  ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/logs/cms2011_event_fm_MSE_20250719-T160224/ckpts/epoch=099-val_loss=2.72315.ckpt"
+  sampler_type: "euler"
+  n_steps: 50
 
-  # impact_model:
-  #   config_path: ""
-  #   ckpt_path: ""
-  #   sampler_type: "euler"
-  #   n_steps: 25
+particle_model:
+  ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/logs/cms2011_particle_rcfm_MSEDir_Deep5M_Flex_20250716-T221618/ckpts/epoch=105-val_loss=0.72356.ckpt"
+  sampler_type: "dpm"
+  n_steps: 40
+
+impact_model:
+  # ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/logs/FM_Impact_Test_Self_20250714-T165850/ckpts/epoch=125-val_loss=0.91373.ckpt"
+  ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/logs/FM_Impact_Test_20250714-T153307/ckpts/epoch=024-val_loss=0.92153.ckpt"
+  sampler_type: "euler"
+  n_steps: 40
+
+data:
+  top_folder: /storage/agrp/dmitrykl/fastsim/f_delphes/data/full_event/output_impact/
+  datasets:
+    - name: ttbar
+      path: TTJets_MSDecays_central_TuneZ2_7TeV-madgraph-tauola/merged_test_v2_pt025_eta27_ghost.root
+      n_events: 50000
+    - name: h4lep
+      path: GluGluToHToZZTo4L_M-125_7TeV-minloHJJ-pythia6-tauola/merged_test_v2_pt025_eta27_ghost.root
+      n_events: 50000
+    # - path: QCD_Pt-470to600_TuneZ2_7TeV_pythia6/merged_test_v2_pt025_eta27_ghost.root
+    #   n_events: 50000
+    # - path: TTJets_MSDecays_central_TuneZ2_7TeV-madgraph-tauola/merged_test_v2_pt025_eta27_ghost.root
+    #   n_events: 50000

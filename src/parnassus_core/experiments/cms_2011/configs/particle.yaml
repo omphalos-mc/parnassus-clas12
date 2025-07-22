@@ -1,4 +1,4 @@
-name: cms2011_particle_rcfm_MSEDir_Deep5M_Flash
+name: cms2011_particle_rcfm_MSEDir_Deep5M_Flex
 
 trainer:
   callbacks:
@@ -98,7 +98,7 @@ model:
           hidden_dim: *dim
           num_heads: 6
           num_layers: 8
-          attn_type: flash-varlen
+          attn_type: flex
           bidirectional: true
           do_selfattn: false
           mha_config:
