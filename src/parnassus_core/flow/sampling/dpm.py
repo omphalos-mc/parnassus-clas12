@@ -183,7 +183,7 @@ class DPM_Solver:
                 self.progress_fn(
                     step / total_steps, desc=f"Generating {step}/{total_steps}"
                 )
-            except:
+            except Exception as _:
                 self.progress_fn(step, total_steps)
 
         else:
@@ -383,7 +383,7 @@ class DPM_Solver:
             x_t: A pytorch tensor. The approximated solution at time `t`.
         """
         ns = self.noise_schedule
-        dims = x.dim()
+        # dims = x.dim()
         lambda_s, lambda_t = ns.marginal_lambda(s), ns.marginal_lambda(t)
         h = lambda_t - lambda_s
         log_alpha_s, log_alpha_t = (
@@ -953,11 +953,14 @@ class DPM_Solver:
         nfe = 0
         if order == 2:
             r1 = 0.5
-            lower_update = lambda x, s, t: self.dpm_solver_first_update(
-                x, s, t, ctxt_dict, return_intermediate=True
-            )
-            higher_update = (
-                lambda x, s, t, **kwargs: self.singlestep_dpm_solver_second_update(
+
+            def lower_update(x, s, t):
+                return self.dpm_solver_first_update(
+                    x, s, t, ctxt_dict, return_intermediate=True
+                )
+
+            def higher_update(x, s, t, **kwargs):
+                return self.singlestep_dpm_solver_second_update(
                     x,
                     s,
                     t,
@@ -966,20 +969,22 @@ class DPM_Solver:
                     solver_type=solver_type,
                     **kwargs,
                 )
-            )
         elif order == 3:
             r1, r2 = 1.0 / 3.0, 2.0 / 3.0
-            lower_update = lambda x, s, t: self.singlestep_dpm_solver_second_update(
-                x,
-                s,
-                t,
-                ctxt_dict,
-                r1=r1,
-                return_intermediate=True,
-                solver_type=solver_type,
-            )
-            higher_update = (
-                lambda x, s, t, **kwargs: self.singlestep_dpm_solver_third_update(
+
+            def lower_update(x, s, t):
+                return self.singlestep_dpm_solver_second_update(
+                    x,
+                    s,
+                    t,
+                    ctxt_dict,
+                    r1=r1,
+                    return_intermediate=True,
+                    solver_type=solver_type,
+                )
+
+            def higher_update(x, s, t, **kwargs):
+                return self.singlestep_dpm_solver_third_update(
                     x,
                     s,
                     t,
@@ -989,7 +994,6 @@ class DPM_Solver:
                     solver_type=solver_type,
                     **kwargs,
                 )
-            )
         else:
             raise ValueError(
                 f"For adaptive step size solver, order must be 2 or 3, got {order}"
@@ -1002,9 +1006,12 @@ class DPM_Solver:
                 torch.ones_like(x).to(x) * atol,
                 rtol * torch.max(torch.abs(x_lower), torch.abs(x_prev)),
             )
-            norm_fn = lambda v: torch.sqrt(
-                torch.square(v.reshape((v.shape[0], -1))).mean(dim=-1, keepdim=True)
-            )
+
+            def norm_fn(v):
+                return torch.sqrt(
+                    torch.square(v.reshape((v.shape[0], -1))).mean(dim=-1, keepdim=True)
+                )
+
             E = norm_fn((x_higher - x_lower) / delta).max()
             if torch.all(E <= 1.0):
                 x = x_higher

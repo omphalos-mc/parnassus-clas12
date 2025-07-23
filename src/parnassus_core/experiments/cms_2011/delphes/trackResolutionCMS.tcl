@@ -104,7 +104,7 @@ set D0ResolutionFormula {
     ( abs(eta) > 1.4 && abs(eta) <= 2.5 ) * ( pt > 73.8967 && pt <= 90.2720 ) * 0.0137 +\
     ( abs(eta) > 1.4 && abs(eta) <= 2.5 ) * ( pt > 90.2720 && pt <= 110.2760 ) * 0.0130 +\
     ( abs(eta) > 1.4 && abs(eta) <= 2.5 ) * ( pt > 110.2760 && pt <= 134.7130 ) * 0.0137 +\
-    ( abs(eta) > 1.4 && abs(eta) <= 2.5 ) * ( pt > 134.7130 ) * 0.0137 
+    ( abs(eta) > 1.4 && abs(eta) <= 2.5 ) * ( pt > 134.7130 ) * 0.0137
 }
 set DZResolutionFormula {
     ( abs(eta) > 0.0 && abs(eta) <= 0.9 ) * ( pt > 0.1823 && pt <= 0.2227 ) * 0.3693 +\
@@ -208,5 +208,5 @@ set DZResolutionFormula {
     ( abs(eta) > 1.4 && abs(eta) <= 2.5 ) * ( pt > 73.8967 && pt <= 90.2720 ) * 0.0816 +\
     ( abs(eta) > 1.4 && abs(eta) <= 2.5 ) * ( pt > 90.2720 && pt <= 110.2760 ) * 0.0820 +\
     ( abs(eta) > 1.4 && abs(eta) <= 2.5 ) * ( pt > 110.2760 && pt <= 134.7130 ) * 0.0814 +\
-    ( abs(eta) > 1.4 && abs(eta) <= 2.5 ) * ( pt > 134.7130 ) * 0.0850 
+    ( abs(eta) > 1.4 && abs(eta) <= 2.5 ) * ( pt > 134.7130 ) * 0.0850
 }

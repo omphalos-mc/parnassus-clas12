@@ -111,17 +111,17 @@ d0:
     std : 1
     min : -54.882
     max : 58.463
-d0Error: 
+d0Error:
     mean : 0
     std : 1
     min : 0.000
     max : 33.009
-z0: 
+z0:
     mean : 0
     std : 5
     min : -304.082
     max : 292.045
-z0Error: 
+z0Error:
     mean : 0
     std : 2.5
     min : 0.001

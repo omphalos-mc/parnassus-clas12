@@ -209,9 +209,9 @@ module Merger TrackMerger {
   set OutputArray tracks
 }
 
-################################                                                                    
-# Track impact parameter smearing                                                                   
-################################       
+################################
+# Track impact parameter smearing
+################################
 
 module TrackSmearing TrackSmearing {
   set InputArray TrackMerger/tracks
@@ -436,7 +436,7 @@ module Merger Calorimeter {
 module PdgCodeFilter EFlowFilter {
   set InputArray EFlowMergerAllTracks/eflow
   set OutputArray eflow
-  
+
   add PdgCode {11}
   add PdgCode {-11}
   add PdgCode {13}

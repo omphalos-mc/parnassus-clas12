@@ -28,7 +28,9 @@ data:
     - name: h4lep
       path: GluGluToHToZZTo4L_M-125_7TeV-minloHJJ-pythia6-tauola/merged_test_v2_pt025_eta27_ghost.root
       n_events: 50000
-    # - path: QCD_Pt-470to600_TuneZ2_7TeV_pythia6/merged_test_v2_pt025_eta27_ghost.root
-    #   n_events: 50000
-    # - path: TTJets_MSDecays_central_TuneZ2_7TeV-madgraph-tauola/merged_test_v2_pt025_eta27_ghost.root
+    - name: qcd470
+      path: QCD_Pt-470to600_TuneZ2_7TeV_pythia6/merged_test_v2_pt025_eta27_ghost.root
+      n_events: 50000
+    # - name: qcd1000
+    #   path: TTJets_MSDecays_central_TuneZ2_7TeV-madgraph-tauola/merged_test_v2_pt025_eta27_ghost.root
     #   n_events: 50000
