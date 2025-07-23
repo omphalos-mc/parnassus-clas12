@@ -6,8 +6,8 @@ To install the `parnassus-core` package, ensure you have Python 3.10 or 3.11 ins
 
 ```bash
 # Clone the repository
-git clone https://github.com/dkobylianskii/parnassus-core/
-cd parnassus
+git clone https://github.com/parnassus-hep/parnassus-core/
+cd parnassus-core
 
 # Install package
 pip install -e .
