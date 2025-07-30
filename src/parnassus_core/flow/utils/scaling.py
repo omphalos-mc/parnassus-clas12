@@ -26,7 +26,13 @@ class VarTransform:
         self.type = self.config.get("type", "std")
         self.fn = self.config.get("fn", None)
         self.fn_scale = self.config.get("fn_scale", 1.0)
+        self.fn_shift = self.config.get("fn_shift", 0.0)
         self.power = self.config.get("power", 1.0)
+        self.clip = self.config.get("clip", None)
+
+        if self.clip is not None:
+            self.min_clip = self.clip.get("min", None)
+            self.max_clip = self.clip.get("max", None)
 
         assert self.fn in TRANSFORM_FUNCTIONS, (
             f"Unknown transformation function {self.fn}. "
@@ -50,18 +56,20 @@ class VarTransform:
             self.scale = (max_ - min_) / 2
 
     def transform(self, x, shift=None, scale=None):
+        if self.clip is not None:
+            x = torch.clamp(x, min=self.min_clip, max=self.max_clip)
         if shift is None:
             shift = self.shift
         if scale is None:
             scale = self.scale
+        x = (x + self.fn_shift) / self.fn_scale
         match self.fn:
             case "log" | "log1p" | "sqrt" | "tanh" | "asinh" | "atan":
-                x = getattr(torch, self.fn)(x / self.fn_scale)
+                x = getattr(torch, self.fn)(x)
             case "pow":
-                x = torch.sign(x) * torch.pow(torch.abs(x) / self.fn_scale, self.power)
+                x = torch.sign(x) * torch.pow(torch.abs(x), self.power)
             case _:
-                x = x / self.fn_scale
-
+                pass
         return (x - shift) / scale
 
     def inverse_transform(self, x, shift=None, scale=None):
@@ -72,23 +80,24 @@ class VarTransform:
         x = x * scale + shift
         match self.fn:
             case "log":
-                return torch.exp(x) * self.fn_scale
+                x = torch.exp(x)
             case "log1p":
-                return torch.expm1(x) * self.fn_scale
+                x = torch.expm1(x)
             case "sqrt":
-                return torch.pow(x, 2) * self.fn_scale
+                x = torch.pow(x, 2)
             case "tanh":
-                return torch.atanh(x) * self.fn_scale
+                x = torch.atanh(x)
             case "asinh":
-                return torch.sinh(x) * self.fn_scale
+                x = torch.sinh(x)
             case "atan":
-                return torch.tan(x) * self.fn_scale
+                x = torch.tan(x)
             case "pow":
-                return torch.sign(x) * torch.pow(torch.abs(x), 1 / self.power)
+                x = torch.sign(x) * torch.pow(torch.abs(x), 1 / self.power)
             case _:
                 # For other functions, we assume they are linear transformations
                 # and do not need to be inverted.
-                return x * self.fn_scale
+                pass
+        x = x * self.fn_scale - self.fn_shift
         return x
 
 

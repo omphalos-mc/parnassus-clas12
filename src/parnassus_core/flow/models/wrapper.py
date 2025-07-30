@@ -81,7 +81,7 @@ class FlowLightning(LightningModule):
             timestep=t,
             ctxt_dict=ctxt_dict,
         )
-        loss = self.loss(ut, vt, pf_mask if pf_data.dim() > 2 else None)
+        loss = self.loss(vt, ut, pf_mask if pf_data.dim() > 2 else None)
         return loss
 
     @torch.no_grad()
