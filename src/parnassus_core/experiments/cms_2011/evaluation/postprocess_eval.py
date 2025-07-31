@@ -57,8 +57,6 @@ parser.add_argument(
     "-n", "--n_events", type=int, help="Number of events to process", default=100
 )
 parser.add_argument("-dr", type=float, help="Delta R for jet clustering", default=0.5)
-parser.add_argument("-no_clustering", action="store_true", help="Skip jet clustering")
-parser.add_argument("-dl", action="store_true", help="Treat as delphes file")
 parser.add_argument("-df", action="store_true", help="Treat as diffusion file")
 parser.add_argument("--eta", type=float, help="Eta cut", default=3.0)
 parser.add_argument("--ip", help="Use impact parameters", action="store_true")
@@ -113,14 +111,16 @@ def init_out_data_dict(ip=False, matching=False):
     return out_data_evt, particle_vars, event_vars
 
 
-def load_file(filename, entry_start=0, n_events=None, fs=False, df=False, ip=False):
+def load_file(filename, entry_start=0, n_events=None, df=False, ip=False):
     truth_data = {var: None for var in PARTICLE_VARS}
     pflow_data = {var: None for var in PARTICLE_VARS + (PARTICLE_IP_VARS if ip else [])}
     with uproot.open(filename, num_workers=4) as file:
         tree = file["evt_tree"]
         if n_events is None:
             n_events = tree.num_entries
-        varlist_ = PARTICLE_VARS if not fs else PARTICLE_VARS + ["ind"]
+        varlist_ = PARTICLE_VARS
+        if "truth_ind" in tree.keys():
+            varlist_ = PARTICLE_VARS + ["ind"]
         truth_vars = [f"truth_{var}" for var in varlist_]
         pflow_prefix = "fastsim" if df else "pflow"
         pflow_vars = [
@@ -290,7 +290,6 @@ def process_events(
             pflow_data[key] = val[pf_evt_mask]
 
         # Jet clustering
-
         pf_jets, pf_jet_indices = cluster_jets(
             pflow_data["pt"], pflow_data["eta"], pflow_data["phi"], jetdef
         )
@@ -401,11 +400,11 @@ def main():
 
     print(f"Loading event file: {args.input.split('/')[-1]}")
     _, fs_data, fs_event_number = load_file(
-        args.input, n_events=args.n_events, fs=not args.dl, df=args.df, ip=args.ip
+        args.input, n_events=args.n_events, df=args.df, ip=args.ip
     )
     print(f"Loading data file: {'/'.join(args.data.split('/')[-2:])}")
     evt_truth_data, evt_pflow_data, evt_event_number = load_file(
-        args.data, n_events=args.n_events, fs=False, ip=args.ip
+        args.data, n_events=args.n_events, ip=args.ip
     )
 
     print("All variables loaded")
