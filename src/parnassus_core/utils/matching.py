@@ -56,7 +56,7 @@ def match_objects(
     if len(new_pairs) == 0:
         if pad_to_len is not None:
             new_truth_ix = np.ones(pad_to_len, dtype=int) * -1
-            new_input_ix = np.arange(pad_to_len)
+            new_input_ix = np.ones(pad_to_len, dtype=int) * -1
         else:
             new_truth_ix = []
             new_input_ix = []
