@@ -124,11 +124,11 @@ DEFAULT_PARTICLE_BINS = {
     "z0Sig": defaultdict(constant_factory(np.linspace(-10, 10, 100))),
 }
 
-DEFAULT_PARTICLE__RES_BINS = {
-    "pt": defaultdict(constant_factory(np.linspace(-1, 1, 50))),
-    "eta": defaultdict(constant_factory(np.linspace(-0.5, 0.5, 50))),
-    "phi": defaultdict(constant_factory(np.linspace(-0.5, 0.5, 50))),
-    "vx": defaultdict(constant_factory(np.linspace(-0.5, 0.5, 50))),
-    "vy": defaultdict(constant_factory(np.linspace(-0.5, 0.5, 50))),
-    "vz": defaultdict(constant_factory(np.linspace(-0.5, 0.5, 50))),
+DEFAULT_PARTICLE_RES_BINS = {
+    "pt_res": defaultdict(constant_factory(np.linspace(-1, 1, 50))),
+    "eta_res": defaultdict(constant_factory(np.linspace(-0.5, 0.5, 50))),
+    "phi_res": defaultdict(constant_factory(np.linspace(-0.5, 0.5, 50))),
+    "vx_res": defaultdict(constant_factory(np.linspace(-0.5, 0.5, 50))),
+    "vy_res": defaultdict(constant_factory(np.linspace(-0.5, 0.5, 50))),
+    "vz_res": defaultdict(constant_factory(np.linspace(-0.5, 0.5, 50))),
 }

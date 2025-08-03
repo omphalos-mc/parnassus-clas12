@@ -11,6 +11,7 @@ from .utils import (
     calc_met_ht,
     calc_particle_residuals,
     load_data,
+    reshape_phi,
     zero_neutral_vtx,
 )
 from parnassus_core.utils.matching import match_objects
@@ -126,6 +127,7 @@ class Data:
             for k, v in data_dict.items()
             if ("jet_" in k and k != "jet_idx")
         }
+        jet_data["phi"] = reshape_phi(jet_data["phi"])
         particle_data_all = extract_particle_data(data_dict, split="all")
         particle_data_jet = extract_particle_data(data_dict, split="jet")
         particle_data_bkg = extract_particle_data(data_dict, split="bkg")
@@ -172,7 +174,7 @@ class Data:
     )
     def calculate_event_data(self):
         print(f"Calculating event data for {self.name} with source {self.source}")
-        self.event_data["njets"] = np.array(
+        self.event_data["njet"] = np.array(
             [len(jet) for jet in self.jet_data.get("pt", [])], dtype=int
         )
         self.event_data["npart"] = np.array(
@@ -205,7 +207,7 @@ class Data:
             assert key in other.event_data, f"Key {key} not found in other data."
             value = self.event_data[key]
             other_value = other.event_data[key]
-            if key in {"njets", "npart"}:
+            if key in {"njet", "npart"}:
                 self.event_data[f"{key}_res"] = value - other_value
             else:
                 self.event_data[f"{key}_res"] = (value - other_value) / (
