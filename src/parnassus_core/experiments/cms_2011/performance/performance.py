@@ -112,6 +112,26 @@ class Data:
     _jets_residuals_calculated: bool = field(default=False, init=False)
 
     _particles_residuals_calculated: bool = field(default=False, init=False)
+    _impact_paramters_calculated: bool = field(default=False, init=False)
+
+    def __getitem__(self, name):
+        """Get the data for the given name."""
+
+        args = name.split("/")
+        match args:
+            case ["event", *rest]:
+                return self.event_data.get(rest[0], None)
+            case ["jet", *rest]:
+                return self.jet_data.get(rest[0], None)
+            case ["particle", collection, *rest]:
+                if collection == "all":
+                    return self.particle_data_all.get(rest[0], None)
+                elif collection == "jet":
+                    return self.particle_data_jet.get(rest[0], None)
+                elif collection == "bkg":
+                    return self.particle_data_bkg.get(rest[0], None)
+                else:
+                    raise ValueError(f"Unknown particle collection: {collection}")
 
     @classmethod
     def load_from_dict(
@@ -300,6 +320,62 @@ class Data:
             for key, value in res.items():
                 pf_data_dict[f"{key}_res"] = value
 
+    @run_once(
+        "_impact_paramters_calculated",
+        "impact parameters already calculated",
+        required_flags=["_events_filtered"],
+    )
+    def calculate_impact_parameters(self):
+        print(
+            f"Calculating impact parameters for {self.name} with source {self.source}"
+        )
+        for split in ["all", "jet", "bkg"]:
+            pf_data_dict = getattr(self, f"particle_data_{split}")
+            if "d0" not in pf_data_dict:
+                print(
+                    f"No impact parameters found in {self.name} for split {split}. Skipping."
+                )
+                continue
+            n_pf = np.array([len(el) for el in pf_data_dict["pt"]])
+            n_pf_total = n_pf.sum()
+            d0Sig = np.zeros(n_pf_total, dtype=float)
+            z0Sig = np.zeros(n_pf_total, dtype=float)
+            ip3d = np.zeros(n_pf_total, dtype=float)
+            ip3dError = np.zeros(n_pf_total, dtype=float)
+            ip3dSig = np.zeros(n_pf_total, dtype=float)
+            curr_idx = 0
+            for i in range(len(n_pf)):
+                slice_ = slice(curr_idx, curr_idx + n_pf[i])
+                d0Sig[slice_] = pf_data_dict["d0"][i] / (
+                    pf_data_dict["d0Error"][i] + 1e-8
+                )
+                z0Sig[slice_] = pf_data_dict["z0"][i] / (
+                    pf_data_dict["z0Error"][i] + 1e-8
+                )
+                ip3d[slice_] = np.sqrt(
+                    pf_data_dict["d0"][i] ** 2 + pf_data_dict["z0"][i] ** 2
+                )
+                ip3dError[slice_] = np.sqrt(
+                    pf_data_dict["d0Error"][i] ** 2 + pf_data_dict["z0Error"][i] ** 2
+                )
+                ip3dSig[slice_] = ip3d[slice_] / (ip3dError[slice_] + 1e-8)
+                curr_idx += n_pf[i]
+            pf_data_dict["d0Sig"] = np.array(
+                np.split(d0Sig, np.cumsum(n_pf)[:-1]), dtype=object
+            )
+            pf_data_dict["z0Sig"] = np.array(
+                np.split(z0Sig, np.cumsum(n_pf)[:-1]), dtype=object
+            )
+            pf_data_dict["ip3d"] = np.array(
+                np.split(ip3d, np.cumsum(n_pf)[:-1]), dtype=object
+            )
+            pf_data_dict["ip3dError"] = np.array(
+                np.split(ip3dError, np.cumsum(n_pf)[:-1]), dtype=object
+            )
+            pf_data_dict["ip3dSig"] = np.array(
+                np.split(ip3dSig, np.cumsum(n_pf)[:-1]), dtype=object
+            )
+
     def __repr__(self):
         return f"Data(name={self.name}, label={self.label}) with {len(self.event_number)} events."
 
@@ -405,6 +481,7 @@ class SampleData:
                 data.match_jets(self.data_dict[Source.TR.name])
                 data.calculate_jet_residuals(self.data_dict[Source.TR.name])
                 data.calculate_particle_residuals(self.data_dict[Source.TR.name])
+                data.calculate_impact_parameters()
         print(f"Processed data for sample {self.sample.name}")
 
 

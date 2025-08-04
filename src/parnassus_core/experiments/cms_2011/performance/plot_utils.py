@@ -1,4 +1,5 @@
 from collections import defaultdict
+from typing import Literal
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -31,8 +32,13 @@ PARTICLE_VARS = [
 IMPACT_VARS = [
     "d0",
     "d0Error",
+    "d0Sig",
     "z0",
     "z0Error",
+    "z0Sig",
+    "ip3d",
+    "ip3dError",
+    "ip3dSig",
 ]
 
 AX_HEIGHT = 5
@@ -53,35 +59,55 @@ class PlotHelper:
         self.num_samples = len(performance.sample_data_dict)
         self.style_dict = style_dict if style_dict is not None else DEFAULT_STYLE_DICT
 
-    def plot_event_features(
+    def plot_features(
         self,
+        data_dict_label: str,
+        var_list: list[str],
         bins: dict[Sample, dict[str, np.ndarray]] | None = None,
-        residuals: bool = False,
+        log_scale_vars: list[str] | str = [],
+        xlabel_prefix: str = "",
+        particle_mask_type: str = "all",
     ):
-        if residuals:
-            bins = DEFAULT_EVENT_RES_BINS if bins is None else bins
-            event_vars = [f"{var}_res" for var in EVENT_VARS]
-            var_labels = RESIDUAL_VAR_LABELS
-        else:
-            bins = DEFAULT_EVENT_BINS if bins is None else bins
-            event_vars = EVENT_VARS
-            var_labels = VAR_LABLES
+        var_labels = VAR_LABLES | RESIDUAL_VAR_LABELS
         fig, ax = plt.subplots(
             self.num_samples,
-            len(event_vars),
-            figsize=(len(event_vars) * AX_HEIGHT, self.num_samples * AX_WIDTH),
+            len(var_list),
+            figsize=(len(var_list) * AX_HEIGHT, self.num_samples * AX_WIDTH),
         )
         if len(ax.shape) == 1:
-            ax = ax.reshape((self.num_samples, len(event_vars)))
+            ax = ax.reshape((self.num_samples, len(var_list)))
         for i, sample in enumerate(self.performance.sample_data_dict):
             sample_data = self.performance.sample_data_dict[sample]
             num_legends = len(sample_data.data_dict) - 1 * (not self.plot_truth)
-            for j, var in enumerate(event_vars):
+            for j, var in enumerate(var_list):
                 for pf_data in sample_data.data_dict.values():
                     if not self.plot_truth and (pf_data.source == Source.TR):
                         continue
-                    value = pf_data.event_data[var]
-                    label = pf_data.label
+                    data_dict = getattr(pf_data, data_dict_label)
+                    value = data_dict[var]
+                    if value.dtype == np.object_:
+                        value = np.concatenate(value)
+                    if var == "d2" and not var.endswith("_res"):
+                        value = np.log(value + 1e-9)
+                    if "particle" in data_dict_label:
+                        match particle_mask_type:
+                            case "all":
+                                mask = np.ones_like(value, dtype=bool)
+                            case "had":
+                                mask = np.concatenate(data_dict["class"]) == 0
+                            case "el":
+                                mask = np.concatenate(data_dict["class"]) == 1
+                            case "mu":
+                                mask = np.concatenate(data_dict["class"]) == 2
+                            case "charged":
+                                mask = np.concatenate(data_dict["class"]) < 3
+                            case "neutral":
+                                mask = np.concatenate(data_dict["class"]) >= 3
+                            case _:
+                                raise ValueError(
+                                    f"Unknown particle_mask_type: {particle_mask_type}"
+                                )
+                        value = value[mask]
                     ax[i, j].hist(
                         value,
                         bins=bins[var][sample],
@@ -89,13 +115,15 @@ class PlotHelper:
                         histtype="stepfilled"
                         if pf_data.source == Source.PF
                         else "step",
-                        label=label,
+                        label=pf_data.label,
                         **self.style_dict[pf_data.name],
                     )
 
                 ax[i, j].yaxis.tick_right()
+                if var in log_scale_vars:
+                    ax[i, j].set_yscale("log")
                 if i == self.num_samples - 1:
-                    ax[i, j].set_xlabel(var_labels[var])
+                    ax[i, j].set_xlabel(xlabel_prefix + var_labels[var])
             ax[i, 0].annotate(
                 SAMPLE_LABELS[sample.name.lower()],
                 xy=(-0.05, 0.5),
@@ -117,6 +145,24 @@ class PlotHelper:
         )
         fig.tight_layout()
         fig.subplots_adjust(hspace=0.1, wspace=0.15)
+        return fig
+
+    def plot_event_features(
+        self,
+        bins: dict[Sample, dict[str, np.ndarray]] | None = None,
+        residuals: bool = False,
+    ):
+        if residuals:
+            bins = DEFAULT_EVENT_RES_BINS if bins is None else bins
+            event_vars = [f"{var}_res" for var in EVENT_VARS]
+        else:
+            bins = DEFAULT_EVENT_BINS if bins is None else bins
+            event_vars = EVENT_VARS
+        fig = self.plot_features(
+            "event_data",
+            event_vars,
+            bins=bins,
+        )
         return fig
 
     def plot_jet_features(
@@ -128,73 +174,19 @@ class PlotHelper:
         if residuals:
             bins = DEFAULT_JET_RES_BINS if bins is None else bins
             jet_vars = [f"{var}_res" for var in JET_VARS]
-            var_labels = RESIDUAL_VAR_LABELS
         else:
             bins = DEFAULT_JET_BINS if bins is None else bins
             jet_vars = JET_VARS
-            var_labels = VAR_LABLES
         if log_scale_vars == "all":
             log_scale_vars = jet_vars
-        fig, ax = plt.subplots(
-            self.num_samples,
-            len(jet_vars),
-            figsize=(len(jet_vars) * AX_HEIGHT, self.num_samples * AX_WIDTH),
+        xlabel_prefix = "Residual jet " if residuals else "Jet "
+        fig = self.plot_features(
+            "jet_data",
+            jet_vars,
+            bins=bins,
+            log_scale_vars=log_scale_vars,
+            xlabel_prefix=xlabel_prefix,
         )
-        if len(ax.shape) == 1:
-            ax = ax.reshape((self.num_samples, len(jet_vars)))
-        for i, sample in enumerate(self.performance.sample_data_dict):
-            sample_data = self.performance.sample_data_dict[sample]
-            num_legends = len(sample_data.data_dict) - 1 * (not self.plot_truth)
-            for j, var in enumerate(jet_vars):
-                for pf_data in sample_data.data_dict.values():
-                    if not self.plot_truth and (pf_data.source == Source.TR):
-                        continue
-                    value = pf_data.jet_data[var]
-                    if value.dtype == np.object_:
-                        value = np.concatenate(value)
-                    if var == "d2" and not residuals:
-                        value = np.log(value + 1e-9)
-                    label = pf_data.label
-                    ax[i, j].hist(
-                        value,
-                        bins=bins[var][sample],
-                        density=True,
-                        histtype="stepfilled"
-                        if pf_data.source == Source.PF
-                        else "step",
-                        label=label,
-                        **self.style_dict[pf_data.name],
-                    )
-
-                ax[i, j].yaxis.tick_right()
-                if i == self.num_samples - 1:
-                    if residuals:
-                        ax[i, j].set_xlabel(f"Residual jet {var_labels[var]}")
-                    else:
-                        ax[i, j].set_xlabel(f"Jet {var_labels[var]}")
-                if var in log_scale_vars:
-                    ax[i, j].set_yscale("log")
-            ax[i, 0].annotate(
-                SAMPLE_LABELS[sample.name.lower()],
-                xy=(-0.05, 0.5),
-                xycoords="axes fraction",
-                fontsize=12,
-                ha="center",
-                va="center",
-                rotation=90,
-            )
-            ax[i, -1].set_ylabel("a.u.", fontsize=12)
-            ax[i, -1].yaxis.set_label_position("right")
-
-        ax[0, 2].legend(
-            loc="upper center",
-            ncol=num_legends,
-            fancybox=True,
-            fontsize=12,
-            bbox_to_anchor=(0.5, 1.325),
-        )
-        fig.tight_layout()
-        fig.subplots_adjust(hspace=0.1, wspace=0.15)
         return fig
 
     def plot_particle_features(
@@ -203,76 +195,44 @@ class PlotHelper:
         collection: str = "all",
         residuals: bool = False,
         log_scale_vars: list[str] | str = [],
+        particle_mask_type: str = "all",
     ):
         if residuals:
             bins = DEFAULT_PARTICLE_RES_BINS if bins is None else bins
             particle_vars = [f"{var}_res" for var in PARTICLE_VARS]
-            var_labels = RESIDUAL_VAR_LABELS
         else:
             bins = DEFAULT_PARTICLE_BINS if bins is None else bins
             particle_vars = PARTICLE_VARS
-            var_labels = VAR_LABLES
         if log_scale_vars == "all":
             log_scale_vars = particle_vars
-        fig, ax = plt.subplots(
-            self.num_samples,
-            len(particle_vars),
-            figsize=(len(particle_vars) * AX_HEIGHT, self.num_samples * AX_WIDTH),
+        xlabel_prefix = "Residual particle " if residuals else "Particle "
+        fig = self.plot_features(
+            f"particle_data_{collection}",
+            particle_vars,
+            bins=bins,
+            log_scale_vars=log_scale_vars,
+            xlabel_prefix=xlabel_prefix,
+            particle_mask_type=particle_mask_type,
         )
-        if len(ax.shape) == 1:
-            ax = ax.reshape((self.num_samples, len(particle_vars)))
-        for i, sample in enumerate(self.performance.sample_data_dict):
-            sample_data = self.performance.sample_data_dict[sample]
-            num_legends = len(sample_data.data_dict) - 1 * (not self.plot_truth)
-            for j, var in enumerate(particle_vars):
-                for pf_data in sample_data.data_dict.values():
-                    if not self.plot_truth and (pf_data.source == Source.TR):
-                        continue
-                    # value = pf_data.particle_data[var]
-                    value = getattr(pf_data, f"particle_data_{collection}")[var]
-                    if value.dtype == np.object_:
-                        value = np.concatenate(value)
-                    if var == "d2" and not residuals:
-                        value = np.log(value + 1e-9)
-                    label = pf_data.label
-                    ax[i, j].hist(
-                        value,
-                        bins=bins[var][sample],
-                        density=True,
-                        histtype="stepfilled"
-                        if pf_data.source == Source.PF
-                        else "step",
-                        label=label,
-                        **self.style_dict[pf_data.name],
-                    )
+        return fig
 
-                ax[i, j].yaxis.tick_right()
-                if i == self.num_samples - 1:
-                    if residuals:
-                        ax[i, j].set_xlabel(f"Residual particle {var_labels[var]}")
-                    else:
-                        ax[i, j].set_xlabel(f"Particle {var_labels[var]}")
-                if var in log_scale_vars:
-                    ax[i, j].set_yscale("log")
-            ax[i, 0].annotate(
-                SAMPLE_LABELS[sample.name.lower()],
-                xy=(-0.05, 0.5),
-                xycoords="axes fraction",
-                fontsize=12,
-                ha="center",
-                va="center",
-                rotation=90,
-            )
-            ax[i, -1].set_ylabel("a.u.", fontsize=12)
-            ax[i, -1].yaxis.set_label_position("right")
-
-        ax[0, 2].legend(
-            loc="upper center",
-            ncol=num_legends,
-            fancybox=True,
-            fontsize=12,
-            bbox_to_anchor=(0.5, 1.325),
+    def plot_impact_features(
+        self,
+        bins: dict[Sample, dict[str, np.ndarray]] | None = None,
+        collection: str = "all",
+        log_scale_vars: list[str] | str = [],
+        particle_mask_type: Literal["had", "el", "mu", "charged"] = "charged",
+    ):
+        bins = DEFAULT_PARTICLE_BINS if bins is None else bins
+        impact_vars = IMPACT_VARS
+        if log_scale_vars == "all":
+            log_scale_vars = impact_vars
+        fig = self.plot_features(
+            f"particle_data_{collection}",
+            impact_vars,
+            bins=bins,
+            xlabel_prefix="Impact parameter ",
+            log_scale_vars=log_scale_vars,
+            particle_mask_type=particle_mask_type,
         )
-        fig.tight_layout()
-        fig.subplots_adjust(hspace=0.1, wspace=0.15)
         return fig

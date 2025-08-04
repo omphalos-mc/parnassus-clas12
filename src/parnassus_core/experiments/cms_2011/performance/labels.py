@@ -15,11 +15,14 @@ VAR_LABLES = {
     "vz": r"$v_{z}$",
     # Impact parameter variables
     "d0": r"$d_{0}$",
-    "d0Err": r"$\sigma_{d_{0}}$",
+    "d0Error": r"$\sigma_{d_{0}}$",
     "d0Sig": r"$d_{0}/\sigma_{d_{0}}$",
     "z0": r"$z_{0}$",
-    "z0Err": r"$\sigma_{z_{0}}$",
+    "z0Error": r"$\sigma_{z_{0}}$",
     "z0Sig": r"$z_{0}/\sigma_{z_{0}}$",
+    "ip3d": r"IP3D",
+    "ip3dError": r"IP3D Error",
+    "ip3dSig": r"IP3D Significance",
     # Substructure variables
     "d2": r"$\ln D_2$",
     "c2": r"$C_2$",

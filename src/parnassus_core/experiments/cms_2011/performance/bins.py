@@ -116,12 +116,15 @@ DEFAULT_PARTICLE_BINS = {
     "vy": defaultdict(constant_factory(np.linspace(-2, 2, 100))),
     "vz": defaultdict(constant_factory(np.linspace(-20, 20, 100))),
     # impact parameter variables
-    "d0": defaultdict(constant_factory(np.linspace(-10, 10, 100))),
-    "d0Err": defaultdict(constant_factory(np.linspace(0, 10, 100))),
-    "d0Sig": defaultdict(constant_factory(np.linspace(-10, 10, 100))),
-    "z0": defaultdict(constant_factory(np.linspace(-20, 20, 100))),
-    "z0Err": defaultdict(constant_factory(np.linspace(0, 10, 100))),
-    "z0Sig": defaultdict(constant_factory(np.linspace(-10, 10, 100))),
+    "d0": defaultdict(constant_factory(np.linspace(-0.5, 0.5, 100))),
+    "d0Error": defaultdict(constant_factory(np.linspace(0, 1, 100))),
+    "d0Sig": defaultdict(constant_factory(np.linspace(-2, 2, 100))),
+    "z0": defaultdict(constant_factory(np.linspace(-1, 1, 100))),
+    "z0Error": defaultdict(constant_factory(np.linspace(0, 2, 100))),
+    "z0Sig": defaultdict(constant_factory(np.linspace(-4, 4, 100))),
+    "ip3d": defaultdict(constant_factory(np.linspace(0, 2, 100))),
+    "ip3dError": defaultdict(constant_factory(np.linspace(0, 2, 100))),
+    "ip3dSig": defaultdict(constant_factory(np.linspace(0, 5, 100))),
 }
 
 DEFAULT_PARTICLE_RES_BINS = {
