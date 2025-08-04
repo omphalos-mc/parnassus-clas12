@@ -1,3 +1,4 @@
+from collections import defaultdict
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -37,12 +38,20 @@ IMPACT_VARS = [
 AX_HEIGHT = 5
 AX_WIDTH = 5
 
+DEFAULT_STYLE_DICT = defaultdict(lambda: dict())
+
 
 class PlotHelper:
-    def __init__(self, performance: Performance, plot_truth: bool = False):
+    def __init__(
+        self,
+        performance: Performance,
+        plot_truth: bool = False,
+        style_dict: dict | None = None,
+    ):
         self.performance = performance
         self.plot_truth = plot_truth
         self.num_samples = len(performance.sample_data_dict)
+        self.style_dict = style_dict if style_dict is not None else DEFAULT_STYLE_DICT
 
     def plot_event_features(
         self,
@@ -81,6 +90,7 @@ class PlotHelper:
                         if pf_data.source == Source.PF
                         else "step",
                         label=label,
+                        **self.style_dict[pf_data.name],
                     )
 
                 ax[i, j].yaxis.tick_right()
@@ -113,7 +123,7 @@ class PlotHelper:
         self,
         bins: dict[Sample, dict[str, np.ndarray]] | None = None,
         residuals: bool = False,
-        log_scale: bool = False,
+        log_scale_vars: list[str] | str = [],
     ):
         if residuals:
             bins = DEFAULT_JET_RES_BINS if bins is None else bins
@@ -123,6 +133,8 @@ class PlotHelper:
             bins = DEFAULT_JET_BINS if bins is None else bins
             jet_vars = JET_VARS
             var_labels = VAR_LABLES
+        if log_scale_vars == "all":
+            log_scale_vars = jet_vars
         fig, ax = plt.subplots(
             self.num_samples,
             len(jet_vars),
@@ -151,6 +163,7 @@ class PlotHelper:
                         if pf_data.source == Source.PF
                         else "step",
                         label=label,
+                        **self.style_dict[pf_data.name],
                     )
 
                 ax[i, j].yaxis.tick_right()
@@ -159,7 +172,7 @@ class PlotHelper:
                         ax[i, j].set_xlabel(f"Residual jet {var_labels[var]}")
                     else:
                         ax[i, j].set_xlabel(f"Jet {var_labels[var]}")
-                if log_scale:
+                if var in log_scale_vars:
                     ax[i, j].set_yscale("log")
             ax[i, 0].annotate(
                 SAMPLE_LABELS[sample.name.lower()],
@@ -189,7 +202,7 @@ class PlotHelper:
         bins: dict[Sample, dict[str, np.ndarray]] | None = None,
         collection: str = "all",
         residuals: bool = False,
-        log_scale: bool = False,
+        log_scale_vars: list[str] | str = [],
     ):
         if residuals:
             bins = DEFAULT_PARTICLE_RES_BINS if bins is None else bins
@@ -199,6 +212,8 @@ class PlotHelper:
             bins = DEFAULT_PARTICLE_BINS if bins is None else bins
             particle_vars = PARTICLE_VARS
             var_labels = VAR_LABLES
+        if log_scale_vars == "all":
+            log_scale_vars = particle_vars
         fig, ax = plt.subplots(
             self.num_samples,
             len(particle_vars),
@@ -228,6 +243,7 @@ class PlotHelper:
                         if pf_data.source == Source.PF
                         else "step",
                         label=label,
+                        **self.style_dict[pf_data.name],
                     )
 
                 ax[i, j].yaxis.tick_right()
@@ -236,7 +252,7 @@ class PlotHelper:
                         ax[i, j].set_xlabel(f"Residual particle {var_labels[var]}")
                     else:
                         ax[i, j].set_xlabel(f"Particle {var_labels[var]}")
-                if log_scale:
+                if var in log_scale_vars:
                     ax[i, j].set_yscale("log")
             ax[i, 0].annotate(
                 SAMPLE_LABELS[sample.name.lower()],
