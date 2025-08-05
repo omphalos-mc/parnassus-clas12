@@ -58,6 +58,7 @@ parser.add_argument(
 )
 parser.add_argument("-dr", type=float, help="Delta R for jet clustering", default=0.5)
 parser.add_argument("-df", action="store_true", help="Treat as diffusion file")
+parser.add_argument("-dl", action="store_true", help="Treat as Delphes file")
 parser.add_argument("--eta", type=float, help="Eta cut", default=3.0)
 parser.add_argument("--ip", help="Use impact parameters", action="store_true")
 parser.add_argument(
@@ -417,6 +418,13 @@ def main():
 
     if args.n_events > len(goodEventNumbers) or args.n_events == -1:
         args.n_events = len(goodEventNumbers)
+    if len(goodEventNumbers) == 0:
+        print(
+            "ERROR: Event numbers do not match in the input files,"
+            " are you sure you are using the same data file as for evaluation?\n"
+            " Exiting..."
+        )
+        sys.exit(1)
     print(
         f"Having {len(goodEventNumbers)} good events, processing {args.n_events} of them"
     )
