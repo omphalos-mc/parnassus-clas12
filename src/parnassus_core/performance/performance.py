@@ -217,7 +217,7 @@ class Data:
             f" against {other.name} with source {other.source}"
         )
         assert self.source != other.source, (
-            "Sources must be the same for residuals calculation."
+            "Sources must be different for residuals calculation."
         )
         assert (self.source != Source.TR) and (other.source == Source.TR), (
             "Only truth data can be used for residuals calculation."
