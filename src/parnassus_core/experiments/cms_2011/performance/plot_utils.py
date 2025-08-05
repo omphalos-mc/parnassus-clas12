@@ -41,6 +41,7 @@ IMPACT_VARS = [
     "ip3dSig",
 ]
 
+FONT_SIZE = 15
 AX_HEIGHT = 5
 AX_WIDTH = 5
 
@@ -52,11 +53,18 @@ class PlotHelper:
         self,
         performance: Performance,
         plot_truth: bool = False,
+        font_size: int = FONT_SIZE,
+        ax_height: int = AX_HEIGHT,
+        ax_width: int = AX_WIDTH,
         style_dict: dict | None = None,
     ):
         self.performance = performance
         self.plot_truth = plot_truth
         self.num_samples = len(performance.sample_data_dict)
+
+        self.font_size = font_size
+        self.ax_height = ax_height
+        self.ax_width = ax_width
         self.style_dict = style_dict if style_dict is not None else DEFAULT_STYLE_DICT
 
     def plot_features(
@@ -72,7 +80,7 @@ class PlotHelper:
         fig, ax = plt.subplots(
             self.num_samples,
             len(var_list),
-            figsize=(len(var_list) * AX_HEIGHT, self.num_samples * AX_WIDTH),
+            figsize=(len(var_list) * self.ax_height, self.num_samples * self.ax_width),
         )
         if len(ax.shape) == 1:
             ax = ax.reshape((self.num_samples, len(var_list)))
@@ -123,24 +131,26 @@ class PlotHelper:
                 if var in log_scale_vars:
                     ax[i, j].set_yscale("log")
                 if i == self.num_samples - 1:
-                    ax[i, j].set_xlabel(xlabel_prefix + var_labels[var])
+                    ax[i, j].set_xlabel(
+                        xlabel_prefix + var_labels[var], fontsize=self.font_size
+                    )
             ax[i, 0].annotate(
                 SAMPLE_LABELS[sample.name.lower()],
                 xy=(-0.05, 0.5),
                 xycoords="axes fraction",
-                fontsize=12,
+                fontsize=self.font_size,
                 ha="center",
                 va="center",
                 rotation=90,
             )
-            ax[i, -1].set_ylabel("a.u.", fontsize=12)
+            ax[i, -1].set_ylabel("a.u.", fontsize=self.font_size)
             ax[i, -1].yaxis.set_label_position("right")
 
         ax[0, 2].legend(
             loc="upper center",
             ncol=num_legends,
             fancybox=True,
-            fontsize=12,
+            fontsize=self.font_size,
             bbox_to_anchor=(0.5, 1.325),
         )
         fig.tight_layout()
