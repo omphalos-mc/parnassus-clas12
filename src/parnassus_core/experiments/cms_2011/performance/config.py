@@ -36,7 +36,7 @@ def init_latex():
             + ":/storage/agrp/dmitrykl/latex/texlive/2024/texmf-dist/tex/latex/dvipng/bin"
         )
         os.environ["LD_LIBRARY_PATH"] = (
-            os.environ["LD_LIBRARY_PATH"]
+            os.environ.get("LD_LIBRARY_PATH", "")
             + ":/storage/agrp/dmitrykl/latex/texlive/2024/texmf-dist/tex/latex/dvipng/libgd-2.3.3/lib:/storage/agrp/dmitrykl/latex/texlive/2024/texmf-dist/tex/latex/dvipng/kpathsea_aux/lib"
         )
     else:
