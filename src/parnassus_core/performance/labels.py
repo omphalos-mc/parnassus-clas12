@@ -1,4 +1,4 @@
-VAR_LABLES = {
+VAR_LABELS = {
     # Event variables
     "npart": r"$N_{\mathrm{part}}$",
     "njet": r"$N_{\mathrm{jet}}$",

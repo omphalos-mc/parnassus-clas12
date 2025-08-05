@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-from .labels import VAR_LABLES, RESIDUAL_VAR_LABELS, SAMPLE_LABELS
+from .labels import VAR_LABELS, RESIDUAL_VAR_LABELS, SAMPLE_LABELS
 from .bins import BinsConfig
 from .config import SampleT, Source
 from .performance import Performance
@@ -71,7 +71,7 @@ class PlotHelper(Generic[SampleT]):
         xlabel_prefix: str = "",
         particle_mask_type: str = "all",
     ):
-        var_labels = VAR_LABLES | RESIDUAL_VAR_LABELS
+        var_labels = VAR_LABELS | RESIDUAL_VAR_LABELS
         fig, ax = plt.subplots(
             self.num_samples,
             len(var_list),

@@ -31,7 +31,7 @@ class BaseSample(Enum):
     pass
 
 
-SampleT = TypeVar("T", bound=BaseSample)
+SampleT = TypeVar("SampleT", bound=BaseSample)
 
 
 @dataclass
