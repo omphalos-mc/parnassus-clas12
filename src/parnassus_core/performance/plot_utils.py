@@ -1,19 +1,12 @@
 from collections import defaultdict
-from typing import Literal
+from typing import ClassVar, Generic, Literal, Type
 import numpy as np
 import matplotlib.pyplot as plt
 
 
 from .labels import VAR_LABLES, RESIDUAL_VAR_LABELS, SAMPLE_LABELS
-from .bins import (
-    DEFAULT_EVENT_BINS,
-    DEFAULT_EVENT_RES_BINS,
-    DEFAULT_JET_BINS,
-    DEFAULT_JET_RES_BINS,
-    DEFAULT_PARTICLE_BINS,
-    DEFAULT_PARTICLE_RES_BINS,
-)
-from .config import Sample, Source
+from .bins import BinsConfig
+from .config import SampleT, Source
 from .performance import Performance
 
 EVENT_VARS = ["npart", "njet", "met_x", "met_y", "ht"]
@@ -48,7 +41,9 @@ AX_WIDTH = 5
 DEFAULT_STYLE_DICT = defaultdict(lambda: dict())
 
 
-class PlotHelper:
+class PlotHelper(Generic[SampleT]):
+    bins_config: ClassVar[Type[BinsConfig[SampleT]]]
+
     def __init__(
         self,
         performance: Performance,
@@ -71,7 +66,7 @@ class PlotHelper:
         self,
         data_dict_label: str,
         var_list: list[str],
-        bins: dict[Sample, dict[str, np.ndarray]] | None = None,
+        bins: dict[SampleT, dict[str, np.ndarray]] | None = None,
         log_scale_vars: list[str] | str = [],
         xlabel_prefix: str = "",
         particle_mask_type: str = "all",
@@ -159,14 +154,14 @@ class PlotHelper:
 
     def plot_event_features(
         self,
-        bins: dict[Sample, dict[str, np.ndarray]] | None = None,
+        bins: dict[SampleT, dict[str, np.ndarray]] | None = None,
         residuals: bool = False,
     ):
         if residuals:
-            bins = DEFAULT_EVENT_RES_BINS if bins is None else bins
+            bins = self.bins_config.event_res_bins if bins is None else bins
             event_vars = [f"{var}_res" for var in EVENT_VARS]
         else:
-            bins = DEFAULT_EVENT_BINS if bins is None else bins
+            bins = self.bins_config.event_bins if bins is None else bins
             event_vars = EVENT_VARS
         fig = self.plot_features(
             "event_data",
@@ -177,15 +172,15 @@ class PlotHelper:
 
     def plot_jet_features(
         self,
-        bins: dict[Sample, dict[str, np.ndarray]] | None = None,
+        bins: dict[SampleT, dict[str, np.ndarray]] | None = None,
         residuals: bool = False,
         log_scale_vars: list[str] | str = [],
     ):
         if residuals:
-            bins = DEFAULT_JET_RES_BINS if bins is None else bins
+            bins = self.bins_config.jet_res_bins if bins is None else bins
             jet_vars = [f"{var}_res" for var in JET_VARS]
         else:
-            bins = DEFAULT_JET_BINS if bins is None else bins
+            bins = self.bins_config.jet_bins if bins is None else bins
             jet_vars = JET_VARS
         if log_scale_vars == "all":
             log_scale_vars = jet_vars
@@ -201,17 +196,17 @@ class PlotHelper:
 
     def plot_particle_features(
         self,
-        bins: dict[Sample, dict[str, np.ndarray]] | None = None,
+        bins: dict[SampleT, dict[str, np.ndarray]] | None = None,
         collection: str = "all",
         residuals: bool = False,
         log_scale_vars: list[str] | str = [],
         particle_mask_type: str = "all",
     ):
         if residuals:
-            bins = DEFAULT_PARTICLE_RES_BINS if bins is None else bins
+            bins = self.bins_config.particle_res_bins if bins is None else bins
             particle_vars = [f"{var}_res" for var in PARTICLE_VARS]
         else:
-            bins = DEFAULT_PARTICLE_BINS if bins is None else bins
+            bins = self.bins_config.particle_bins if bins is None else bins
             particle_vars = PARTICLE_VARS
         if log_scale_vars == "all":
             log_scale_vars = particle_vars
@@ -228,12 +223,12 @@ class PlotHelper:
 
     def plot_impact_features(
         self,
-        bins: dict[Sample, dict[str, np.ndarray]] | None = None,
+        bins: dict[SampleT, dict[str, np.ndarray]] | None = None,
         collection: str = "all",
         log_scale_vars: list[str] | str = [],
         particle_mask_type: Literal["had", "el", "mu", "charged"] = "charged",
     ):
-        bins = DEFAULT_PARTICLE_BINS if bins is None else bins
+        bins = self.bins_config.particle_bins if bins is None else bins
         impact_vars = IMPACT_VARS
         if log_scale_vars == "all":
             log_scale_vars = impact_vars
