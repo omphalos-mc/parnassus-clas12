@@ -75,7 +75,7 @@ class PlotHelper(Generic[SampleT]):
         fig, ax = plt.subplots(
             self.num_samples,
             len(var_list),
-            figsize=(len(var_list) * self.ax_height, self.num_samples * self.ax_width),
+            figsize=(len(var_list) * self.ax_width, self.num_samples * self.ax_height),
         )
         if len(ax.shape) == 1:
             ax = ax.reshape((self.num_samples, len(var_list)))
