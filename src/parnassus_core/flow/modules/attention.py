@@ -9,8 +9,7 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
 )
 from torch.nn.functional import scaled_dot_product_attention
-
-from hepattn.models.norm import LayerNorm
+from torch.nn import LayerNorm
 
 ATTN_TYPES = {
     "torch": scaled_dot_product_attention,
