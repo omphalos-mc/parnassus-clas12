@@ -28,9 +28,43 @@ python main.py fit -c configs/impact.yaml # For impact-level model
     ```
 </details>
 
+### Testing/Prediction
+
+By `Testing` we mean the process of generating predictions using the trained models (without running the full evaluation chain).
+
+<details>
+<summary>Testing details</summary>
+
+    - The testing process is similar to the training process, but it uses the `test` subcommand instead of `fit`.
+    - For event model it will generate event-level quantities and save them to a ROOT file.
+    - For particle model it will generate particle-level quantities using the PFlow event-level features as the conditioning, and save them to a ROOT file.
+    - For impact model it will generate impact parameters using the PFlow particle-level features as the conditioning, and save them to a ROOT file.
+
+</details>
+
+To test the models separately, you can run the following command from the `src/parnassus_core/experiments/cms_2011/` directory:
+
+```bash
+python main.py test \
+    -c <path_to_config_file> \
+    --ckpt_path <path_to_checkpoint_file> \
+    --data.test_path <path_to_test_data_file> \
+    --data.test_batch_size <batch_size (default 100)> \
+    --data.num_test <number_of_test_events (default -1 -- all)> \
+    --data.eval_output_name <output_filename>
+```
+Config and checkpoint files should be from already trained models.
+
+As a result, the predictions will be saved to the same directory as the config file, in a file named `<output_filename>_<number_of_test_events // 1e3>k.root`.
+
 ### Evaluation
 
-To evaluate the models, you can run the evaluation script from the `src/parnassus_core/experiments/cms_2011/evaluation/` directory:
+By `Evaluation` we mean the full-chain evaluation of the models, which includes:
+1. Running the event-level model on the test dataset to generate event-level quantities.
+2. Running the particle-level model on the event-level outputs to generate particle-level quantities.
+3. Running the impact-level model on the particle-level outputs to generate impact parameters.
+
+To run the full evaluation chain, you can use the `eval.py` script located in the `src/parnassus_core/experiments/cms_2011/evaluation/` directory.
 
 ```bash
 python eval.py -c config.yaml
