@@ -183,3 +183,125 @@ class FeatureScaler:
             if key in self.transforms:
                 x[key] = self.transforms[key].inverse_transform(value)
         return x
+
+
+class Unscaler:
+    def __init__(
+        self,
+        feature_scaler: FeatureScaler,
+        fs_vars: list[str],
+        ctxt_vars: list[str],
+        ctxt_global_vars: list[str],
+        sin_cos: bool = True,
+    ):
+        """
+        Initialize the Unscaler with a FeatureScaler and lists of feature names.
+
+        Parameters
+        ----------
+        feature_scaler : FeatureScaler
+            The FeatureScaler instance used for scaling transformations.
+        fs_vars : list[str]
+            List of fast simulation feature names.
+        ctxt_vars : list[str]
+            List of context feature names.
+        ctxt_global_vars : list[str]
+            List of global context feature names.
+        sin_cos : bool, optional
+            Whether to have sine and cosine transformations for angular variables, by default True.
+        """
+        self.feature_scaler = feature_scaler
+        self.fs_vars = fs_vars
+        self.ctxt_vars = ctxt_vars
+        self.ctxt_global_vars = ctxt_global_vars
+        self.sin_cos = sin_cos
+
+    def extract_var(self, data, var_name, var_idx, sin_cos=False):
+        index_shift = 0
+        if var_name.endswith("phi") and sin_cos:
+            var = torch.atan2(
+                data[..., var_idx],
+                data[..., var_idx + 1],
+            )
+            index_shift = 2
+        elif var_name.endswith("class"):
+            var = data[..., var_idx : var_idx + 5].argmax(-1)
+            index_shift = 5
+        else:
+            var = self.feature_scaler[var_name].inverse_transform(data[..., var_idx])
+            index_shift = 1
+        return var, index_shift
+
+    def unscale_variables(self, fs_data, ctxt_dict, pf_data=None):
+        fs_data = fs_data.cpu()
+        has_pflow = False
+        if pf_data is not None:
+            pf_data = pf_data.cpu()
+            has_pflow = True
+        ctxt_dict = {k: v.cpu() for k, v in ctxt_dict.items()}
+        new_data_dict = {}
+        var_idx = 0
+        for var_name in self.ctxt_global_vars:
+            if var_name == "means":
+                var_idx += len(
+                    [
+                        el
+                        for el in self.ctxt_vars
+                        if (el.startswith("truth_") and "class" not in el)
+                    ]
+                )
+            elif var_name.startswith("truth_") or var_name.startswith("ntruth"):
+                var_name = var_name.replace("truth_", "").replace("ntruth", "npart")
+                new_data_dict[f"tr_{var_name}"] = (
+                    self.feature_scaler[var_name]
+                    .inverse_transform(ctxt_dict["ctxt_global_data"][..., var_idx])
+                    .numpy()
+                )
+                var_idx += 1
+            elif var_name.startswith("pflow_"):
+                var_name = var_name.replace("pflow_", "")
+                new_data_dict[f"pf_{var_name}"] = (
+                    self.feature_scaler[var_name]
+                    .inverse_transform(ctxt_dict["ctxt_global_data"][..., var_idx])
+                    .numpy()
+                )
+                var_idx += 1
+        var_idx = 0
+        for var_name in self.ctxt_vars:
+            if var_name.startswith("pflow_"):
+                continue
+            var_name = var_name.replace("truth_", "")
+            var, index_shift = self.extract_var(
+                ctxt_dict["ctxt_data"], var_name, var_idx, self.sin_cos
+            )
+            var_idx += index_shift
+            var = var.numpy()
+            if var_name == "ptrel":
+                var = var * new_data_dict["tr_ht"].reshape(-1, 1)
+                var_name = "pt"
+            new_data_dict[f"tr_{var_name}"] = var
+        var_idx = 0
+        for var_name in self.fs_vars:
+            var_name = var_name.replace("pflow_", "").replace("npflow", "npart")
+            fs_, index_shift = self.extract_var(
+                fs_data, var_name, var_idx, self.sin_cos
+            )
+            if has_pflow:
+                pf_, _ = self.extract_var(pf_data, var_name, var_idx, self.sin_cos)
+            var_idx += index_shift
+            fs_ = fs_.numpy()
+            pf_ = pf_.numpy() if has_pflow else None
+            if var_name == "ptrel":
+                fs_ = fs_ * new_data_dict["pf_ht"].reshape(-1, 1)
+                pf_ = pf_ * new_data_dict["pf_ht"].reshape(-1, 1) if has_pflow else None
+                var_name = "pt"
+            new_data_dict[f"fs_{var_name}"] = fs_
+            if has_pflow:
+                new_data_dict[f"pf_{var_name}"] = pf_
+        if "ctxt_mask" in ctxt_dict:
+            new_data_dict["ctxt_mask"] = ctxt_dict["ctxt_mask"].numpy()
+        if "fs_mask" in ctxt_dict:
+            new_data_dict["fs_mask"] = ctxt_dict["fs_mask"].numpy()
+        if "eventNumber" in ctxt_dict:
+            new_data_dict["eventNumber"] = ctxt_dict["eventNumber"].numpy()
+        return new_data_dict
