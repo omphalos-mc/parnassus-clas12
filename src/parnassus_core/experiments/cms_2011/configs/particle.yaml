@@ -17,6 +17,7 @@ trainer:
     - class_path: lightning.pytorch.callbacks.StochasticWeightAveraging
       init_args:
         swa_lrs: 3e-5
+    - class_path: parnassus_core.flow.callbacks.PredictionWriter
 
 data:
   train_type: particle

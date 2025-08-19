@@ -50,6 +50,7 @@ trainer:
     - class_path: lightning.pytorch.callbacks.TQDMProgressBar
       init_args:
         refresh_rate: 50
+    - class_path: parnassus_core.flow.callbacks.PredictionWriter
 
 model:
   optimizer: Lion

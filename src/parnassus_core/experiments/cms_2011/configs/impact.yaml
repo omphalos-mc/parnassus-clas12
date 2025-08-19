@@ -1,4 +1,4 @@
-name: FM_Impact_Test_Self
+name: cms2011_impact_icfm_MSEDir_FlashSim
 
 trainer:
   callbacks:
@@ -17,6 +17,7 @@ trainer:
     - class_path: lightning.pytorch.callbacks.StochasticWeightAveraging
       init_args:
         swa_lrs: 3e-5
+    - class_path: parnassus_core.flow.callbacks.PredictionWriter
 
 data:
   train_type: particle
@@ -25,7 +26,7 @@ data:
   num_train: 2_800_000
   num_valid: 35_000
 
-  scale_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/configs/var_transform_atan.yaml
+  scale_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/configs/var_transform_flashsim.yaml
   var_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/configs/impact_vars.yaml
 
 model:
@@ -115,7 +116,7 @@ model:
           num_layers: 2
           ctxt_ratio: 2
           bidirectional: false
-          do_selfattn: true
+          do_selfattn: false
           attn_type: flex
           mha_config:
             qk_norm: true

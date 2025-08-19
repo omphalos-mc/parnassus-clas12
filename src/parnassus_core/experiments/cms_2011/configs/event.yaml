@@ -1,7 +1,8 @@
 name: cms2011_event_fm_MSE
 
 trainer:
-  max_epochs: 100
+  max_epochs: 500
+  gradient_clip_val: 1.0
 
   callbacks:
     - class_path: parnassus_core.flow.callbacks.Checkpoint
@@ -19,6 +20,7 @@ trainer:
     - class_path: lightning.pytorch.callbacks.StochasticWeightAveraging
       init_args:
         swa_lrs: 3e-5
+    - class_path: parnassus_core.flow.callbacks.PredictionWriter
 
 data:
 
@@ -36,7 +38,7 @@ model:
   optimizer: Lion
   optimizer_kwargs:
     lr: 3e-5
-    weight_decay: 0.01
+    # weight_decay: 0.01
 
   lrs_config:
     skip_scheduler: false
@@ -52,6 +54,7 @@ model:
     init_args:
       sigma: 0.0001
       flow_type: fm
+      time_pow: true
 
   sampler_type: pndm
   n_steps: 25
@@ -103,7 +106,7 @@ model:
           input_dim: *dim
           hidden_dim: *dim
           output_dim: *dim
-          num_blocks: 4
+          num_blocks: 3
           n_lyr_pbk: 3
           do_res: True
           do_out: False
