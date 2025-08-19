@@ -123,6 +123,16 @@ class FlowLightning(LightningModule):
             sync_dist=True,
         )
 
+    def test_step(self, data, batch_idx):
+        loss = self.forward(data)
+        self.log(
+            "test/loss",
+            loss,
+            batch_size=data[0].shape[0],
+            sync_dist=True,
+        )
+        return loss
+
     def on_train_epoch_end(self):
         self.log("lr", self.lr_schedulers().get_last_lr()[0], sync_dist=True)
 

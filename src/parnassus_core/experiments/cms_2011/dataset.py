@@ -46,7 +46,7 @@ class CMSDataset(Dataset):
         fs_mask_type: Literal["all", "charged", "neutral"] = "all",
         reduce_ds: float | int = 1.0,
         entry_start: int = 0,
-        mode: str = "train",
+        mode: Literal["train", "test", "eval"] = "train",
     ):
         super().__init__()
         self.feature_scaler = FeatureScaler(scale_dict)
@@ -62,7 +62,9 @@ class CMSDataset(Dataset):
 
         self.mode = mode
 
-        assert self.mode in ["train", "eval"], "Mode must be either 'train' or 'eval'"
+        assert self.mode in ["train", "test", "eval"], (
+            "Mode must be either 'train', 'test' or 'eval'"
+        )
 
         self.train_type = train_type
         self.sin_cos = sin_cos
@@ -84,7 +86,7 @@ class CMSDataset(Dataset):
         self.full_data_array = {}
 
         self.n_truth_particles = self._load_data("truth", self.truth_vars_to_load)
-        if self.mode == "train":
+        if self.mode != "eval":
             self.n_pflow_particles = self._load_data("pflow", self.pflow_vars_to_load)
         self._merge_and_preprocess(mask_events=True)
 
@@ -98,7 +100,7 @@ class CMSDataset(Dataset):
                 )
         if (
             self.zero_neutral_vtx
-            and self.mode == "train"
+            and self.mode != "eval"
             and "pflow_class" in self.full_data_array
         ):
             for var in ["vx", "vy", "vz"]:
@@ -125,7 +127,7 @@ class CMSDataset(Dataset):
         self.n_truth_particles = self.n_truth_particles[self.n_particle_mask]
         self.truth_cumsum = np.cumsum([0] + list(self.n_truth_particles))
 
-        if self.mode == "train":
+        if self.mode != "eval":
             self.n_pflow_particles = self.n_pflow_particles[self.n_particle_mask]
             self.pflow_cumsum = np.cumsum([0] + list(self.n_pflow_particles))
 
@@ -171,7 +173,7 @@ class CMSDataset(Dataset):
                 self.scaled_ctxt_global_data.append(
                     self.feature_scaler["npart"].transform(self.n_truth_particles)
                 )
-            elif var == "npflow" and self.mode == "train":
+            elif var == "npflow" and self.mode != "eval":
                 self.scaled_ctxt_global_data.append(
                     self.feature_scaler["npart"].transform(self.n_pflow_particles)
                 )
@@ -305,7 +307,7 @@ class CMSDataset(Dataset):
             self.full_data_array["truth_ptrel"][truth_start:truth_end]
         )[::-1]
 
-        if self.mode == "train" and "pflow_ptrel" in self.full_data_array:
+        if self.mode != "eval" and "pflow_ptrel" in self.full_data_array:
             n_pflow_particles = self.n_pflow_particles[idx]
             pflow_start, pflow_end = self.pflow_cumsum[idx], self.pflow_cumsum[idx + 1]
             pflow_idx = np.argsort(
@@ -318,7 +320,7 @@ class CMSDataset(Dataset):
             if "truth_" in var:
                 x = self.full_data_array[var][truth_start:truth_end][truth_idx]
                 arr_to_fill_ = ctxt_data
-            elif "pflow_" in var and self.mode == "train":
+            elif "pflow_" in var and self.mode != "eval":
                 x = self.full_data_array[var][pflow_start:pflow_end][pflow_idx]
                 arr_to_fill_ = pf_ctxt_data
             x = torch.tensor(x, dtype=torch.float32).view(-1, 1)
@@ -435,12 +437,10 @@ class CMSDataset(Dataset):
         ctxt_dict["ctxt_global_data"] = torch.tensor(
             self.scaled_ctxt_global_data[idx]
         ).float()
-        if self.mode == "eval":
-            ctxt_dict["eventNumber"] = self.full_data_array["eventNumber"][idx].to(
-                torch.int64
-            )
-            return ctxt_dict
-        if self.mode == "train":
+        ctxt_dict["eventNumber"] = self.full_data_array["eventNumber"][idx].to(
+            torch.int64
+        )
+        if self.mode != "eval":
             fs_data, fs_mask = self._get_fs_data(idx)
             ctxt_dict["fs_mask"] = fs_mask
         return fs_data, ctxt_dict
@@ -464,9 +464,12 @@ class CMSDataModule(LightningDataModule):
         scale_dict: str,
         var_dict: str,
         fs_mask_type: Literal["all", "charged", "neutral"] = "all",
+        num_test: int = -1,
+        test_batch_size: int = 100,
         entry_start_train: int = 0,
         entry_start_valid: int = 0,
         entry_start_test: int = 0,
+        eval_output_name: str | None = None,
     ):
         super().__init__()
         self.num_workers = num_workers
@@ -475,6 +478,7 @@ class CMSDataModule(LightningDataModule):
         self.test_path = test_path
         self.train_batch_size = train_batch_size
         self.valid_batch_size = valid_batch_size
+        self.test_batch_size = test_batch_size
         self.max_particles = max_particles
         self.train_type = train_type
         self.sin_cos = sin_cos
@@ -483,49 +487,67 @@ class CMSDataModule(LightningDataModule):
         self.var_dict = var_dict
         self.num_train = num_train
         self.num_valid = num_valid
+        self.num_test = num_test
         self.entry_start_train = entry_start_train
         self.entry_start_valid = entry_start_valid
         self.entry_start_test = entry_start_test
 
+        self.eval_output_name = eval_output_name
+
         self.fs_mask_type = fs_mask_type
+
+    def setup_dataset(self, path: str, num_events: int, entry_start: int, mode: str):
+        return CMSDataset(
+            filename=path,
+            max_particles=self.max_particles,
+            train_type=self.train_type,
+            sin_cos=self.sin_cos,
+            zero_neutral_vtx=self.zero_neutral_vtx,
+            scale_dict=self.scale_dict,
+            var_dict=self.var_dict,
+            fs_mask_type=self.fs_mask_type,
+            reduce_ds=num_events,
+            entry_start=entry_start,
+            mode=mode,
+        )
 
     def setup(self, stage: str = None):
         if self.trainer.is_global_zero:
             print("-" * 100)
 
         # create training and validation datasets
-        self.train_dset = CMSDataset(
-            filename=self.train_path,
-            max_particles=self.max_particles,
-            train_type=self.train_type,
-            sin_cos=self.sin_cos,
-            zero_neutral_vtx=self.zero_neutral_vtx,
-            scale_dict=self.scale_dict,
-            var_dict=self.var_dict,
-            reduce_ds=self.num_train,
-            entry_start=self.entry_start_train,
-            fs_mask_type=self.fs_mask_type,
-            mode="train",
-        )
-
-        self.valid_dset = CMSDataset(
-            filename=self.valid_path,
-            max_particles=self.max_particles,
-            train_type=self.train_type,
-            sin_cos=self.sin_cos,
-            zero_neutral_vtx=self.zero_neutral_vtx,
-            scale_dict=self.scale_dict,
-            var_dict=self.var_dict,
-            reduce_ds=self.num_valid,
-            entry_start=self.entry_start_valid,
-            fs_mask_type=self.fs_mask_type,
-            mode="train",
-        )
+        if stage in (None, "fit", "validate"):
+            print("Setting up training and validation datasets")
+            self.train_dset = self.setup_dataset(
+                path=self.train_path,
+                num_events=self.num_train,
+                entry_start=self.entry_start_train,
+                mode="train",
+            )
+            self.valid_dset = self.setup_dataset(
+                path=self.valid_path,
+                num_events=self.num_valid,
+                entry_start=self.entry_start_valid,
+                mode="train",
+            )
+        if stage in (None, "test"):
+            print("Setting up test dataset")
+            self.test_dset = self.setup_dataset(
+                path=self.test_path,
+                num_events=self.num_test,
+                entry_start=self.entry_start_test,
+                mode="test",
+            )
 
         # Only print train/val dataset details when actually training
         if self.trainer.is_global_zero:
-            print(f"Created training dataset with {len(self.train_dset):,} events")
-            print(f"Created validation dataset with {len(self.valid_dset):,} events")
+            if stage in (None, "fit", "validate"):
+                print(f"Created training dataset with {len(self.train_dset):,} events")
+                print(
+                    f"Created validation dataset with {len(self.valid_dset):,} events"
+                )
+            if stage in (None, "test"):
+                print(f"Created test dataset with {len(self.test_dset):,} events")
             print("-" * 100, "\n")
 
     def get_dataloader(self, dataset: CMSDataset, shuffle: bool, batch_size: int):
@@ -550,4 +572,10 @@ class CMSDataModule(LightningDataModule):
         print("Instantiating validation dataloader on rank", self.trainer.local_rank)
         return self.get_dataloader(
             dataset=self.valid_dset, shuffle=False, batch_size=self.valid_batch_size
+        )
+
+    def test_dataloader(self):
+        print("Instantiating test dataloader on rank", self.trainer.local_rank)
+        return self.get_dataloader(
+            dataset=self.test_dset, shuffle=False, batch_size=self.test_batch_size
         )

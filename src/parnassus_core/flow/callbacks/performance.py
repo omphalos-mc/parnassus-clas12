@@ -9,6 +9,7 @@ from lightning import Callback, LightningModule, Trainer
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from sklearn.metrics import confusion_matrix
+from parnassus_core.flow.utils.scaling import Unscaler
 
 mpl.use("Agg")
 import matplotlib.pyplot as plt
@@ -40,7 +41,7 @@ def _add_hist_1d(ax, data, bins, label, histtype="step", **kwargs):
 
 
 LOG_VARS = {
-    "ptrel",
+    "pt",
     "vx",
     "vy",
     "vz",
@@ -54,7 +55,7 @@ LOG_VARS = {
 
 PARTICLE_BINS_DICT = {
     # Particle variables
-    "ptrel": np.linspace(0, 1, 100),
+    "pt": np.linspace(0, 100, 100),
     "eta": np.linspace(-3, 3, 100),
     "phi": np.linspace(-np.pi, np.pi, 100),
     "vx": np.linspace(-2, 2, 50),
@@ -92,7 +93,6 @@ VARIABLES_LABELS = {
     "met_x": "$MET_x$",
     "met_y": "$MET_y$",
     "npart": "$N_{part}$",
-    "ptrel": "$p_{T, rel}$",
     "pt": "$p_T$",
     "eta": "$\\eta$",
     "phi": "$\\phi$",
@@ -171,22 +171,12 @@ class PerformanceLogger(Callback):
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
         pf_data, ctxt_dict = batch
-        # fs_mask = ctxt_dict["fs_mask"]
         return_dict = {}
         with torch.no_grad():
             fs_data = pl_module.sample(
                 pf_data.shape,
                 ctxt_dict=ctxt_dict,
             )
-            # if pl_module.current_epoch % 5 == 0:
-            #     pred_loss = pl_module.prediction_loss(fs_data, pf_data, fs_mask)
-            #     for key, val in pred_loss.items():
-            #         pl_module.log(
-            #             f"pred_{key}",
-            #             val,
-            #             batch_size=pf_data.shape[0],
-            #             sync_dist=True,
-            #         )
         for key, val in ctxt_dict.items():
             return_dict[key] = val.cpu()
         return_dict["fs_data"] = fs_data.cpu()
@@ -195,19 +185,25 @@ class PerformanceLogger(Callback):
         self.validation_step_outputs.append(return_dict)
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        plot_dict = {}
+        ctxt_dict = {}
+        fs_data = []
+        pf_data = []
+        batch_size = self.validation_step_outputs[0]["fs_data"].shape[0]
         for el in self.validation_step_outputs:
             for key, val in el.items():
-                if key not in plot_dict:
-                    plot_dict[key] = []
-                plot_dict[key].append(val)
-        for key, val in plot_dict.items():
-            if isinstance(val, list):
-                plot_dict[key] = torch.cat(val, dim=0)
-            else:
-                plot_dict[key] = val
-        batch_size = plot_dict["fs_data"].shape[0]
-        plot_dict = self.unscale_variables(plot_dict)
+                if key == "fs_data":
+                    fs_data.append(val)
+                elif key == "pf_data":
+                    pf_data.append(val)
+                else:
+                    if key not in ctxt_dict:
+                        ctxt_dict[key] = []
+                    ctxt_dict[key].append(val)
+        fs_data = torch.cat(fs_data, dim=0)
+        pf_data = torch.cat(pf_data, dim=0)
+        for key, val in ctxt_dict.items():
+            ctxt_dict[key] = torch.cat(val, dim=0)
+        plot_dict = self.unscaler.unscale_variables(fs_data, ctxt_dict, pf_data=pf_data)
         pred_loss_dict = self.plot_data(pl_module=pl_module, plot_dict=plot_dict)
         for key, val in pred_loss_dict.items():
             pl_module.log(
@@ -221,85 +217,15 @@ class PerformanceLogger(Callback):
     def on_validation_epoch_start(self, trainer: Trainer, pl_module):
         if not self.is_setted_up:
             valid_dataset = trainer.val_dataloaders.dataset
-            self.feature_scaler = valid_dataset.feature_scaler
-            self.fs_vars = valid_dataset.fs_vars
-            self.ctxt_vars = valid_dataset.ctxt_vars
-            self.ctxt_global_vars = valid_dataset.ctxt_global_vars
-            self.sin_cos = valid_dataset.sin_cos
+            self.unscaler = Unscaler(
+                feature_scaler=valid_dataset.feature_scaler,
+                ctxt_global_vars=valid_dataset.ctxt_global_vars,
+                ctxt_vars=valid_dataset.ctxt_vars,
+                fs_vars=valid_dataset.fs_vars,
+                sin_cos=valid_dataset.sin_cos,
+            )
             self.is_setted_up = True
         self.validation_step_outputs.clear()
-
-    def extract_var(self, data, var_name, var_idx, sin_cos=False):
-        shift = 0
-        if var_name.endswith("phi") and sin_cos:
-            ctxt_ = torch.atan2(
-                data[..., var_idx],
-                data[..., var_idx + 1],
-            )
-            shift = 2
-        elif var_name.endswith("class"):
-            ctxt_ = data[..., var_idx : var_idx + 5].argmax(-1)
-            shift = 5
-        else:
-            ctxt_ = self.feature_scaler[var_name].inverse_transform(data[..., var_idx])
-            shift = 1
-        return ctxt_, shift
-
-    def unscale_variables(self, data_dict):
-        new_data_dict = {}
-        var_idx = 0
-        for var in self.ctxt_global_vars:
-            if var == "means":
-                var_idx += len(
-                    [
-                        el
-                        for el in self.ctxt_vars
-                        if (el.startswith("truth_") and "class" not in el)
-                    ]
-                )
-            elif var.startswith("truth_") or var.startswith("ntruth"):
-                var = var.replace("truth_", "").replace("ntruth", "npart")
-                new_data_dict[f"tr_{var}"] = (
-                    self.feature_scaler[var]
-                    .inverse_transform(data_dict["ctxt_global_data"][..., var_idx])
-                    .numpy()
-                )
-                var_idx += 1
-            elif var.startswith("pflow_"):
-                var = var.replace("pflow_", "")
-                new_data_dict[f"pf_{var}"] = (
-                    self.feature_scaler[var]
-                    .inverse_transform(data_dict["ctxt_global_data"][..., var_idx])
-                    .numpy()
-                )
-                var_idx += 1
-        var_idx = 0
-        for var in self.ctxt_vars:
-            if var.startswith("pflow_"):
-                continue
-            var_name = var.replace("truth_", "")
-            ctxt_, shift = self.extract_var(
-                data_dict["ctxt_data"], var_name, var_idx, self.sin_cos
-            )
-            var_idx += shift
-            new_data_dict[f"tr_{var_name}"] = ctxt_.numpy()
-        var_idx = 0
-        for var in self.fs_vars:
-            var_name = var.replace("pflow_", "").replace("npflow", "npart")
-            pf_, _ = self.extract_var(
-                data_dict["pf_data"], var_name, var_idx, self.sin_cos
-            )
-            fs_, shift = self.extract_var(
-                data_dict["fs_data"], var_name, var_idx, self.sin_cos
-            )
-            var_idx += shift
-            new_data_dict[f"pf_{var_name}"] = pf_.numpy()
-            new_data_dict[f"fs_{var_name}"] = fs_.numpy()
-        if "ctxt_mask" in data_dict:
-            new_data_dict["ctxt_mask"] = data_dict["ctxt_mask"].numpy()
-        if "fs_mask" in data_dict:
-            new_data_dict["fs_mask"] = data_dict["fs_mask"].numpy()
-        return new_data_dict
 
     def update_impact_vars(
         self, plot_dict: dict[str, np.ndarray]
@@ -412,9 +338,9 @@ class ParticlePerformanceLogger(PerformanceLogger):
         axs[i].set_xlabel("FastSim")
         i += 1
 
-        tr_pt = plot_dict["tr_ptrel"] * tr_mask * plot_dict["tr_ht"].reshape(-1, 1)
-        pf_pt = plot_dict["pf_ptrel"] * pf_mask * plot_dict["pf_ht"].reshape(-1, 1)
-        fs_pt = plot_dict["fs_ptrel"] * pf_mask * plot_dict["pf_ht"].reshape(-1, 1)
+        tr_pt = plot_dict["tr_pt"] * tr_mask
+        pf_pt = plot_dict["pf_pt"] * pf_mask
+        fs_pt = plot_dict["fs_pt"] * pf_mask
 
         tr_phi = plot_dict["tr_phi"] * tr_mask
         pf_phi = plot_dict["pf_phi"] * pf_mask
@@ -492,7 +418,7 @@ class ParticlePerformanceLogger(PerformanceLogger):
         for ax in axs:
             ax.set_box_aspect(1)
         fig.subplots_adjust(hspace=0.3, wspace=0.3)
-        plt.savefig(f"ED_{pl_module.current_epoch}.png")
+        plt.savefig(f"logs/figs/PART_ED_{pl_module.current_epoch}.png")
         if pl_module.logger is not None:
             pl_module.logger.experiment.log_image(
                 image_data=image,
@@ -650,7 +576,7 @@ class ImpactPerformanceLogger(PerformanceLogger):
             int(h), int(w), 3
         )
         fig.subplots_adjust(hspace=0.3, wspace=0.3)
-        plt.savefig(f"ED_{pl_module.current_epoch}.png")
+        plt.savefig(f"logs/figs/IMP_ED_{pl_module.current_epoch}.png")
         if pl_module.logger is not None:
             pl_module.logger.experiment.log_image(
                 image_data=image,

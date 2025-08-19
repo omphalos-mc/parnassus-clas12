@@ -4,6 +4,8 @@ import yaml
 import argparse
 from pathlib import Path
 
+IO_LIMIT = 100
+
 top_dir = Path(__file__).parent.resolve()
 pbs_dir = top_dir / "pbs"
 if not pbs_dir.exists():
@@ -45,8 +47,8 @@ with open(run_script, "w") as f:
     f.write("#!/bin/bash\n")
     if args.gpu:
         f.write(f"#PBS -l gputype={args.gpu}\n")
-    f.write("IOTHROTTLE_LIMIT=0\n")
-    f.write("export IOTHROTTLE_LIMIT=0\n")
+    f.write(f"IOTHROTTLE_LIMIT={IO_LIMIT}\n")
+    f.write(f"export IOTHROTTLE_LIMIT={IO_LIMIT}\n")
     f.write("export IOTHROTTLE_VERBOSE=1\n")
     f.write(
         "source /usr/wipp/conda/24.5.0/bin/activate /usr/wipp/conda/24.5.0u/envs/common\n"
