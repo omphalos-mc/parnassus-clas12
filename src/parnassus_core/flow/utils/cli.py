@@ -96,7 +96,6 @@ class CLI(LightningCLI):
             for c in sc["trainer.callbacks"]:
                 if hasattr(c, "init_args") and hasattr(c.init_args, "refresh_rate"):
                     c.init_args.refresh_rate = 1
-
             # Ensure only one device is used for testing
             n_devices = sc["trainer.devices"]
             if (isinstance(n_devices, str | int)) and int(n_devices) > 1:
@@ -107,7 +106,12 @@ class CLI(LightningCLI):
 
     def after_instantiate_classes(self) -> None:
         """After instantiating classes, set the checkpoint path if not provided."""
+
+        sc = self.config[self.subcommand]
         if self.subcommand == "test" and not self.trainer.ckpt_path:
-            config = self.config[self.subcommand]["config"]
-            assert len(config) == 1
-            self.trainer.ckpt_path = get_best_epoch(Path(config[0].rel_path))
+            ckpt_path = sc["ckpt_path"] or get_best_epoch(
+                Path(sc["config"][0].rel_path)
+            )
+            self.trainer.ckpt_path = ckpt_path
+            self.trainer.ckpt_dir = Path(ckpt_path).parent
+            self.trainer.ckpt_name = str(Path(ckpt_path).stem)

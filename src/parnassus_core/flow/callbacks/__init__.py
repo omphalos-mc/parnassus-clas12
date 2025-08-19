@@ -7,6 +7,7 @@ from .performance import (
     EventPerformanceLogger,
     ImpactPerformanceLogger,
 )
+from .prediction_writer import PredictionWriter
 
 __all__ = [
     "EMA",
@@ -17,4 +18,5 @@ __all__ = [
     "ParticlePerformanceLogger",
     "EventPerformanceLogger",
     "ImpactPerformanceLogger",
+    "PredictionWriter",
 ]
