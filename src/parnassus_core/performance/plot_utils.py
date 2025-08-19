@@ -111,6 +111,8 @@ class PlotHelper(Generic[SampleT]):
                                     f"Unknown particle_mask_type: {particle_mask_type}"
                                 )
                         value = value[mask]
+                    if var in IMPACT_VARS:
+                        value = value[value > -990]
                     ax[i, j].hist(
                         value,
                         bins=bins[var][sample],
