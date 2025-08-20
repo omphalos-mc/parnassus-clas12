@@ -99,10 +99,10 @@ class Attention(nn.Module):
             )
 
         if self.qk_norm:
-            self.q_norm = LayerNorm(dim)
-            self.k_norm = LayerNorm(dim)
+            self.q_norm = LayerNorm(dim, elementwise_affine=False)
+            self.k_norm = LayerNorm(dim, elementwise_affine=False)
         if self.v_norm:
-            self.v_norm = LayerNorm(dim)
+            self.v_norm = LayerNorm(dim, elementwise_affine=False)
 
         self.reset_parameters()
         self.set_backend(attn_type, torch_compile=torch_compile)
