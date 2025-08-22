@@ -1,3 +1,4 @@
+# Based on source code from: https://github.com/samvanstroud/hepattn
 import torch
 import torch.nn.functional as F
 from flash_attn import flash_attn_func, flash_attn_varlen_func
