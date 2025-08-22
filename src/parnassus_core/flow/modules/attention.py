@@ -9,7 +9,7 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
 )
 from torch.nn.functional import scaled_dot_product_attention
-from torch.nn import LayerNorm
+from .norms import RMSNorm
 
 ATTN_TYPES = {
     "torch": scaled_dot_product_attention,
@@ -99,10 +99,10 @@ class Attention(nn.Module):
             )
 
         if self.qk_norm:
-            self.q_norm = LayerNorm(dim, elementwise_affine=False)
-            self.k_norm = LayerNorm(dim, elementwise_affine=False)
+            self.q_norm = RMSNorm(dim)
+            self.k_norm = RMSNorm(dim)
         if self.v_norm:
-            self.v_norm = LayerNorm(dim, elementwise_affine=False)
+            self.v_norm = RMSNorm(dim)
 
         self.reset_parameters()
         self.set_backend(attn_type, torch_compile=torch_compile)

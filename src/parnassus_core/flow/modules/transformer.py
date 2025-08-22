@@ -70,9 +70,9 @@ class DiTLayer(nn.Module):
         ctxt_ratio: float = 3.0,
     ):
         super().__init__()
-        self.norm1 = nn.RMSNorm(hidden_dim)
-        self.norm_k = nn.RMSNorm(hidden_dim)
-        self.norm2 = nn.RMSNorm(hidden_dim)
+        self.norm1 = nn.LayerNorm(hidden_dim, elementwise_affine=False)
+        self.norm_k = nn.LayerNorm(hidden_dim, elementwise_affine=False)
+        self.norm2 = nn.LayerNorm(hidden_dim, elementwise_affine=False)
         mlp_hidden_dim = int(hidden_dim * mlp_ratio)
         self.mlp = GLU(hidden_dim, mlp_hidden_dim, bias=False, gated=True)
         self.adaLN_modulation = nn.Sequential(
