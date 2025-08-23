@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from lightning.pytorch import LightningModule
 
-from parnassus_core.flow.modules.optimizer import Lion, Muon
+from parnassus_core.flow.modules.optimizer import Lion
 from parnassus_core.flow.sampling import (
     DPM_Solver,
     EulerSampler,
@@ -27,7 +27,7 @@ class FlowLightning(LightningModule):
         fm: FlowMatcher,
         lrs_config: dict,
         optimizer_kwargs: dict,
-        optimizer: Literal["AdamW", "Lion", "Muon"] = "AdamW",
+        optimizer: Literal["AdamW", "Lion"] = "AdamW",
         sampler_type: Literal["euler", "pndm", "dpm"] = "euler",
         n_steps: int = 25,
     ):
@@ -148,14 +148,6 @@ class FlowLightning(LightningModule):
                 self.net.parameters(),
                 **self.optimizer_kwargs,
             )
-        elif self.optimizer == "muon":
-            optimizer = Muon(
-                muon_params=self.net.parameters(),
-                adamw_params=self.net.parameters(),
-                **self.optimizer_kwargs,
-            )
-        else:
-            raise ValueError(f"Unknown optimizer: {self.optimizer}")
 
         if not self.lrs_config.get("skip_scheduler"):
             if self.lrs_config.get("lr_scheduler_type", "cosine") == "warmup_decay":

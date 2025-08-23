@@ -94,7 +94,7 @@ class TestDenseNetwork:
     ):
         rng = np.random.default_rng(42)
         input_dim = output_dim = rng.integers(1, 100)
-        hidden_dim = rng.integers(1, 100)
+        hidden_dim = int(rng.integers(1, 100))
         ctxt_dim = rng.integers(1, 20)
         ctxt = torch.randn(*self.SEQ_SHAPE, ctxt_dim)
         x = torch.randn(*self.SEQ_SHAPE, input_dim)
