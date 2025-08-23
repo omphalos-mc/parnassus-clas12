@@ -49,8 +49,6 @@ def test_attention_consistency(
 ):
     if not HAS_GPU and attn_type in ATTN_TYPES_GPU:
         pytest.skip(f"Skipping {attn_type} test as GPU is not available")
-    if attn_type == "flash-varlen" and kv_len is not None:
-        pytest.skip("flash-varlen does not support cross attention")
 
     # Generate random input tensors
     q = torch.randn(batch_size, q_len, dim, dtype=torch.float16, device=DEVICE)
