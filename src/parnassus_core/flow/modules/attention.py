@@ -75,6 +75,9 @@ class Attention(nn.Module):
         value_residual: bool = False,
         qk_norm: bool = False,
         v_norm: bool = False,
+        fuse_mlp: bool = False,
+        mlp_ratio: float = 4.0,
+        mlp_activation: str = "GELU",
     ) -> None:
         super().__init__()
         assert dim % num_heads == 0, "num_heads must divide dim."
@@ -88,10 +91,17 @@ class Attention(nn.Module):
         self.value_residual = value_residual
         self.qk_norm = qk_norm
         self.v_norm = v_norm
+        self.fuse_mlp = fuse_mlp
+        self.mlp_hidden_dim = int(dim * mlp_ratio) if fuse_mlp else 0
+        self.mlp_activation = getattr(nn, mlp_activation)() if fuse_mlp else None
 
-        self.in_proj_weight = nn.Parameter(torch.empty(3 * dim, dim))
-        self.in_proj_bias = nn.Parameter(torch.empty(3 * dim)) if bias else None
-        self.out_proj = nn.Linear(dim, dim, bias=bias)
+        self.in_proj_weight = nn.Parameter(
+            torch.empty(3 * dim + self.mlp_hidden_dim, dim)
+        )
+        self.in_proj_bias = (
+            nn.Parameter(torch.empty(3 * dim + self.mlp_hidden_dim)) if bias else None
+        )
+        self.out_proj = nn.Linear(dim + self.mlp_hidden_dim, dim, bias=bias)
 
         if self.value_residual:
             self.value_residual_mix = nn.Sequential(
@@ -137,6 +147,50 @@ class Attention(nn.Module):
             x = x.transpose(-3, -2)  # B H S Dh -> B S H Dh
         return x.flatten(-2)  # B S H Dh -> B S D
 
+    def _projection_packed(self, q: Tensor, kv: Tensor | None = None):
+        if kv is None:
+            if self.fuse_mlp:
+                qkv, mlp = torch.split(
+                    F.linear(q, self.in_proj_weight, self.in_proj_bias),
+                    [3 * self.dim, self.mlp_hidden_dim],
+                    dim=-1,
+                )
+            else:
+                qkv = F.linear(q, self.in_proj_weight, self.in_proj_bias)
+                mlp = None
+            q, k, v = (
+                qkv.unflatten(-1, (3, self.dim))
+                .unsqueeze(0)
+                .transpose(0, -2)
+                .squeeze(-2)
+                .contiguous()
+            )
+            return q, k, v, mlp
+
+        dim = q.size(-1)
+        w_q, w_kv = self.in_proj_weight.split([dim + self.mlp_hidden_dim, dim * 2])
+        b_q, b_kv = (
+            self.in_proj_bias.split([dim + self.mlp_hidden_dim, dim * 2])
+            if self.in_proj_bias is not None
+            else (None, None)
+        )
+
+        # Now we can do the seperate projections
+        q = F.linear(q, w_q, b_q)
+        kv = F.linear(kv, w_kv, b_kv)
+        k, v = (
+            kv.unflatten(-1, (2, dim))
+            .unsqueeze(0)
+            .transpose(0, -2)
+            .squeeze(-2)
+            .contiguous()
+        )
+        if self.fuse_mlp:
+            q, mlp = q.split([self.dim, self.mlp_hidden_dim], dim=-1)
+        else:
+            mlp = None
+        return q, k, v, mlp
+
     def _prepare_qkv(
         self, q: Tensor, kv: Tensor | None = None, initial_values: dict | None = None
     ) -> tuple[Tensor, Tensor, Tensor]:
@@ -148,12 +202,8 @@ class Attention(nn.Module):
             if self.attn_type not in FLASH_ATTN_TYPES:
                 mix = mix.transpose(-2, -3)
 
-        # Check if the input is nested tensor
-        if kv is None:
-            kv = q
-        q, k, v = F._in_projection_packed(
-            q, kv, kv, self.in_proj_weight, self.in_proj_bias
-        )  # noqa: SLF001
+        # Project q, k, v and possibly mlp
+        q, k, v, mlp = self._projection_packed(q, kv)
 
         # Normalize queries, keys, and values
         if self.qk_norm:
@@ -173,7 +223,7 @@ class Attention(nn.Module):
                 initial_values["v"] = v
             else:
                 v = v * mix + initial_values["v"] * (1.0 - mix)
-        return q, k, v
+        return q, k, v, mlp
 
     def _flash_varlen_attention(
         self,
@@ -259,9 +309,11 @@ class Attention(nn.Module):
             assert self.attn_type in ATTN_MASK_ATTN_TYPES, msg
 
         # Prepare queries, keys, and values
-        q, k, v = self._prepare_qkv(q, kv, initial_values)
+        q, k, v, mlp = self._prepare_qkv(q, kv, initial_values)
         if self.attn_type == "flash-varlen":
             out = self._flash_varlen_attention(q, k, v, q_mask=q_mask, kv_mask=kv_mask)
+            if self.fuse_mlp:
+                out = torch.cat([out, self.mlp_activation(mlp)], dim=-1)
             return self.out_proj(out)
         # Fused attention
         if self.attn_type == "flex":
@@ -283,4 +335,6 @@ class Attention(nn.Module):
 
         # Get output
         out = self.recombine_heads(out)
+        if self.fuse_mlp:
+            out = torch.cat([out, self.mlp_activation(mlp)], dim=-1)
         return self.out_proj(out)
