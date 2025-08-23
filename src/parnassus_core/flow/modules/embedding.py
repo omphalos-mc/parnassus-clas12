@@ -129,11 +129,15 @@ class GlobalContextEmbedding(nn.Module):
         for name in self.input_names:
             if name + "_embd" in ctxt_dict:
                 embd = ctxt_dict[name + "_embd"]
-                if mask_dict and name in mask_dict:
-                    mask = mask_dict[name + "_mask"]
-                    embd = T.sum(embd * mask.unsqueeze(-1), dim=1) / T.sum(
-                        mask, dim=1, keepdim=True
-                    )
+                mask_name = name + "_mask"
+                if mask_dict and mask_name in mask_dict:
+                    mask = mask_dict[mask_name]
+                    numerator = T.sum(embd * mask.unsqueeze(-1), dim=1)
+                    denominator = T.sum(mask, dim=1, keepdim=True)
+                    if denominator.sum() > 0:
+                        embd = numerator / denominator
+                    else:
+                        embd = T.zeros_like(numerator)
                 elif embd.dim() == 3:
                     embd = T.mean(embd, dim=1)
                 ctxt_embd.append(embd)

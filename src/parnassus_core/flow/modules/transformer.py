@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from torch import Tensor
 import torch.nn as nn
 
@@ -56,8 +57,40 @@ class GLU(nn.Module):
         return self.out_proj(x)
 
 
-def modulate(x, shift, scale):
-    return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+@dataclass
+class ModulationOut:
+    shift: Tensor
+    scale: Tensor
+    gate: Tensor
+
+    def modulate(self, x: Tensor) -> Tensor:
+        return x * (1 + self.scale) + self.shift
+
+
+class Modulation(nn.Module):
+    def __init__(self, dim: int, double: bool, ctxt_ratio: float = 3.0):
+        super().__init__()
+        self.dim = dim
+        self.ctxt_ratio = ctxt_ratio
+        self.is_double = double
+        self.multiplier = 6 if double else 3
+        self.lin = nn.Linear(
+            int(dim * ctxt_ratio), int(self.multiplier * dim), bias=True
+        )
+
+    def forward(self, vec: Tensor) -> tuple[ModulationOut, ModulationOut | None]:
+        out = self.lin(nn.functional.silu(vec))[:, None, :].chunk(
+            self.multiplier, dim=-1
+        )
+
+        return (
+            ModulationOut(*out[:3]),
+            ModulationOut(*out[3:]) if self.is_double else None,
+        )
+
+    def reset_parameters(self):
+        nn.init.zeros_(self.lin.weight)
+        nn.init.zeros_(self.lin.bias)
 
 
 class DiTLayer(nn.Module):
@@ -68,16 +101,19 @@ class DiTLayer(nn.Module):
         mha_config: dict = None,
         mlp_ratio: float = 4.0,
         ctxt_ratio: float = 3.0,
+        simplify: bool = False,
     ):
         super().__init__()
-        self.norm1 = nn.RMSNorm(hidden_dim)
-        self.norm_k = nn.RMSNorm(hidden_dim)
-        self.norm2 = nn.RMSNorm(hidden_dim)
-        mlp_hidden_dim = int(hidden_dim * mlp_ratio)
-        self.mlp = GLU(hidden_dim, mlp_hidden_dim, bias=False, gated=True)
-        self.adaLN_modulation = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(int(ctxt_ratio * hidden_dim), hidden_dim * 6, bias=True),
+        self.simplify = simplify
+
+        self.norm1 = nn.LayerNorm(hidden_dim, elementwise_affine=False)
+        self.norm_k = nn.LayerNorm(hidden_dim, elementwise_affine=False)
+        if not simplify:
+            self.norm2 = nn.LayerNorm(hidden_dim, elementwise_affine=False)
+            mlp_hidden_dim = int(hidden_dim * mlp_ratio)
+            self.mlp = GLU(hidden_dim, mlp_hidden_dim, bias=False, gated=True)
+        self.adaLN_modulation = Modulation(
+            hidden_dim, double=not simplify, ctxt_ratio=ctxt_ratio
         )
         if mha_config is None:
             mha_config = {}
@@ -85,6 +121,8 @@ class DiTLayer(nn.Module):
         self.attn = Attention(
             dim=hidden_dim,
             num_heads=num_heads,
+            fuse_mlp=simplify,
+            mlp_ratio=mlp_ratio,
             **mha_config,
         )
         self.set_backend(mha_config.get("attn_type", "torch"))
@@ -95,30 +133,30 @@ class DiTLayer(nn.Module):
         return self.attn_type
 
     def forward(self, seq_q, seq_k, ctxt, mask_k=None):
-        (
-            shift_msa,
-            scale_msa,
-            gate_msa,
-            shift_mlp,
-            scale_mlp,
-            gate_mlp,
-        ) = self.adaLN_modulation(ctxt).chunk(6, dim=-1)
+        # Common stuff
+        mod_mha, mod_mlp = self.adaLN_modulation(ctxt)
+        seq_q_mod = mod_mha.modulate(self.norm1(seq_q))
+        seq_k = self.norm_k(seq_k)
 
-        seq_q = seq_q + gate_msa.unsqueeze(1) * self.attn(
-            q=modulate(self.norm1(seq_q), shift_msa, scale_msa),
-            kv=self.norm_k(seq_k),
+        if self.simplify:
+            return seq_q + mod_mha.gate * self.attn(
+                q=seq_q_mod,
+                kv=seq_k,
+                kv_mask=mask_k if self.attn_type != "flex" else None,
+                attn_mask=mask_k if self.attn_type == "flex" else None,
+            )
+
+        seq_q = seq_q + mod_mha.gate * self.attn(
+            q=seq_q_mod,
+            kv=seq_k,
             kv_mask=mask_k if self.attn_type != "flex" else None,
             attn_mask=mask_k if self.attn_type == "flex" else None,
         )
-
-        seq_q = seq_q + gate_mlp.unsqueeze(1) * self.mlp(
-            modulate(self.norm2(seq_q), shift_mlp, scale_mlp)
-        )
+        seq_q = seq_q + mod_mlp.gate * self.mlp(mod_mlp.modulate(self.norm2(seq_q)))
         return seq_q
 
     def reset_parameters(self):
-        nn.init.constant_(self.adaLN_modulation[-1].weight, 0)
-        nn.init.constant_(self.adaLN_modulation[-1].bias, 0)
+        self.adaLN_modulation.reset_parameters()
 
 
 class SADiTLayer(DiTLayer):
@@ -141,6 +179,7 @@ class DiTBlock(nn.Module):
         ctxt_ratio=3.0,
         bidirectional=False,
         do_selfattn=False,
+        simplify=False,
     ):
         super().__init__()
         self.bidirectional = bidirectional
@@ -152,6 +191,7 @@ class DiTBlock(nn.Module):
             "mha_config": mha_config,
             "mlp_ratio": mlp_ratio,
             "ctxt_ratio": ctxt_ratio,
+            "simplify": simplify,
         }
 
         if do_selfattn:
@@ -213,6 +253,7 @@ class DiTEncoder(nn.Module):
         attn_type: str = "torch",
         do_selfattn: bool = False,
         bidirectional: bool = True,
+        simplify: bool = False,
     ):
         super().__init__()
         self.attn_type = attn_type
@@ -221,6 +262,7 @@ class DiTEncoder(nn.Module):
         self.num_layers = num_layers
         self.do_selfattn = do_selfattn
         self.bidirectional = bidirectional
+        self.simplify = simplify
         if mha_config is None:
             mha_config = {}
         mha_config["attn_type"] = attn_type
@@ -234,6 +276,7 @@ class DiTEncoder(nn.Module):
                     ctxt_ratio=ctxt_ratio,
                     bidirectional=bidirectional and i != num_layers - 1,
                     do_selfattn=do_selfattn,
+                    simplify=simplify,
                 )
                 for i in range(num_layers)
             ]
@@ -248,6 +291,10 @@ class DiTEncoder(nn.Module):
         return self.attn_type
 
     def forward(self, seq_a, seq_b, ctxt, mask_a=None, mask_b=None):
+        if self.attn_type == "flex":
+            assert seq_a.size(1) == seq_b.size(1), (
+                "For flex attention, sequences must be of equal length."
+            )
         for layer in self.layers:
             seq_a, seq_b = layer(seq_a, seq_b, ctxt, mask_a, mask_b)
         return seq_a, seq_b

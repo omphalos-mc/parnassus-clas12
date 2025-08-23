@@ -16,3 +16,15 @@ class LayerScale(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x.mul_(self.gamma) if self.inplace else x * self.gamma
+
+
+class RMSNorm(torch.nn.Module):
+    def __init__(self, dim: int):
+        super().__init__()
+        self.scale = nn.Parameter(torch.ones(dim))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x_dtype = x.dtype
+        x = x.float()
+        rrms = torch.rsqrt(torch.mean(x**2, dim=-1, keepdim=True) + 1e-6)
+        return (x * rrms).to(dtype=x_dtype) * self.scale
