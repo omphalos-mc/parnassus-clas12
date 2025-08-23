@@ -127,6 +127,7 @@ def test_attention_consistency(
             KV_LEN=KV_LEN,
             device=DEVICE,
         )
+
     # Compute outputs
     custom_out = attention_layer(
         q,
@@ -182,6 +183,31 @@ def test_qkv_norm():
     )
 
     out = attn(x, x)
+    assert out.shape == x.shape
+
+
+@pytest.mark.gpu
+def test_fuse_mlp():
+    # generate inputs
+    x = torch.randn(2, 16, 64, dtype=torch.float16, device=DEVICE)
+
+    # Initialize attention layers
+    attn = (
+        Attention(
+            dim=64,
+            num_heads=4,
+            attn_type="torch",
+            bias=False,
+            fuse_mlp=True,
+            mlp_activation="SiLU",
+            mlp_ratio=2.0,
+        )
+        .to(DEVICE)
+        .half()
+    )
+
+    out = attn(x)
+
     assert out.shape == x.shape
 
 
