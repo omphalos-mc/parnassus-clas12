@@ -30,20 +30,24 @@ class ParticleNetwork(nn.Module):
         self.encoder = encoder
         self.fs_out_net = fs_out_net
 
-        self.attn_type = self.encoder.attn_type
-
-        if "flash" in self.attn_type:
-            self.context_manager = torch.amp.autocast(
-                enabled=True, dtype=torch.bfloat16, device_type="cuda"
-            )
-        else:
-            self.context_manager = nullcontext()
+        self.context_manager = nullcontext()
+        self.attn_type = self.change_backend(encoder.attn_type)
 
     def create_padding_mask(self, pads_kv):
         def padding(b, h, q_idx, kv_idx):
             return pads_kv[b, kv_idx]
 
         return padding
+
+    def change_backend(self, attn_type: str):
+        self.attn_type = self.encoder.set_backend(attn_type)
+        if "flash" in self.attn_type:
+            self.context_manager = torch.amp.autocast(
+                enabled=True, dtype=torch.bfloat16, device_type="cuda"
+            )
+        else:
+            self.context_manager = nullcontext()
+        return self.attn_type
 
     def forward(
         self,
@@ -98,5 +102,5 @@ class ParticleNetwork(nn.Module):
                 mask_b=attn_mask_ctxt,
             )
 
-        fs_out = self.fs_out_net(fs_embd, ctxt=global_embd)
+        fs_out = self.fs_out_net(fs_embd.to(ctxt_embd), ctxt=global_embd)
         return fs_out

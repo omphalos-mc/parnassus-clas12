@@ -330,7 +330,7 @@ class HeunSampler(Sampler):
         **kwargs,
     ):
         mask = ctxt_dict["fs_mask"]
-        device = mask.device
+        _, device = ctxt_dict["ctxt_data"].dtype, ctxt_dict["ctxt_data"].device
         fastsim = self._init_fastsim(pflow_shape, mask, device)
         t_steps = self.t_steps.to(device)
         for i, (t_cur, t_next) in tqdm(
@@ -358,7 +358,7 @@ class RK4Sampler(Sampler):
         **kwargs,
     ):
         mask = ctxt_dict["fs_mask"]
-        device = mask.device
+        _, device = ctxt_dict["ctxt_data"].dtype, ctxt_dict["ctxt_data"].device
         fastsim = self._init_fastsim(pflow_shape, mask, device)
         t_steps = self.t_steps.to(device)
         for i, (t_cur, t_next) in tqdm(
@@ -425,7 +425,7 @@ class PNDMSampler(Sampler):
         **kwargs,
     ):
         mask = ctxt_dict["fs_mask"]
-        device = mask.device
+        _, device = ctxt_dict["ctxt_data"].dtype, ctxt_dict["ctxt_data"].device
         fastsim = self._init_fastsim(pflow_shape, mask, device)
         t_steps = self.t_steps.to(device)
         ets = []
