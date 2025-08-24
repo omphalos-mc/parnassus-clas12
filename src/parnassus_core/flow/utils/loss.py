@@ -1,3 +1,4 @@
+from typing import Literal
 import numpy as np
 import torch
 import torch.nn as nn
@@ -5,65 +6,88 @@ import torch.nn.functional as F
 from scipy.optimize import linear_sum_assignment
 
 
-# loss = (
-#     self.loss(ut * pf_mask, vt * pf_mask) / pf_mask.sum() / ut.shape[-1]
-# )
-
-
-class MSELoss(torch.nn.Module):
+class MSELoss(nn.Module):
     """
     Figure 7 - https://arxiv.org/abs/2410.10356
     """
 
-    def __init__(self):
+    def __init__(self, reduction: Literal["mean", "sum"] = "mean"):
         super().__init__()
-
-    def forward(self, pred, target, mask=None):
-        if mask is not None:
-            pred = pred * mask.unsqueeze(-1)
-            target = target * mask.unsqueeze(-1)
-        mse_loss = F.mse_loss(pred, target, reduction="sum")
-        if mask is None:
-            return mse_loss / sum(pred.shape)
-        # If mask is provided, normalize by the number of valid elements
-        # and the number of features in the last dimension
-        # (e.g., pt, eta, phi)
-        return mse_loss / mask.sum() / pred.shape[-1]
-
-
-class MSEAndDirectionLoss(torch.nn.Module):
-    """
-    Figure 7 - https://arxiv.org/abs/2410.10356
-    """
-
-    def __init__(self, cosine_sim_dim: int = 2):
-        super().__init__()
-        assert cosine_sim_dim > 0, "cannot be batch dimension"
-        self.cosine_sim_dim = cosine_sim_dim
+        assert reduction in ["mean", "sum"], "reduction must be 'mean' or 'sum'"
+        self.reduction = reduction
 
     def forward(
         self, pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | None = None
     ):
-        if pred.dim() == 2 and self.cosine_sim_dim == 2:
-            self.cosine_sim_dim = 1
         if mask is not None:
             pred = pred * mask.unsqueeze(-1)
             target = target * mask.unsqueeze(-1)
         mse_loss = F.mse_loss(pred, target, reduction="sum")
-        direction_loss = (
-            1.0 - F.cosine_similarity(pred, target, dim=self.cosine_sim_dim)
-        ).sum()
-        loss = mse_loss + direction_loss
+        if self.reduction == "sum":
+            return mse_loss
+        elif self.reduction == "mean":
+            denominator = (
+                np.prod(pred.shape) if mask is None else mask.sum() * pred.shape[-1]
+            )
+            return mse_loss / denominator
+
+
+class MSEAndDirectionLoss(nn.Module):
+    """
+    Figure 7 - https://arxiv.org/abs/2410.10356
+    """
+
+    def __init__(
+        self, cosine_sim_dim: int = 2, reduction: Literal["mean", "sum"] = "mean"
+    ):
+        super().__init__()
+        assert cosine_sim_dim > 0, "cannot be batch dimension"
+        assert reduction in ["mean", "sum"], "reduction must be 'mean' or 'sum'"
+        self.cosine_sim_dim = cosine_sim_dim
+        self.reduction = reduction
+
+    def forward(
+        self, pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | None = None
+    ):
+        # Adjust cosine similarity dimension for 2D tensors
+        cosine_dim = (
+            1 if pred.dim() == 2 and self.cosine_sim_dim == 2 else self.cosine_sim_dim
+        )
+
+        # Apply mask if provided
         if mask is not None:
-            return loss / mask.sum() / pred.shape[-1]
+            pred_masked = pred * mask.unsqueeze(-1)
+            target_masked = target * mask.unsqueeze(-1)
         else:
-            return loss / sum(pred.shape)
+            pred_masked = pred
+            target_masked = target
+
+        # Compute losses
+        mse_loss = F.mse_loss(pred_masked, target_masked, reduction="sum")
+        direction_loss = 1.0 - F.cosine_similarity(
+            pred_masked, target_masked, dim=cosine_dim
+        )
+
+        if mask is not None:
+            direction_loss = direction_loss * mask
+        direction_loss = direction_loss.sum()
+
+        # Apply reduction
+        if self.reduction == "sum":
+            return mse_loss + direction_loss
+
+        # Mean reduction
+        mse_denominator = (
+            np.prod(pred.shape) if mask is None else mask.sum() * pred.shape[-1]
+        )
+        cosine_denominator = np.prod(pred.shape[:-1]) if mask is None else mask.sum()
+
+        return mse_loss / mse_denominator + direction_loss / cosine_denominator
 
 
 class Set2SetLoss(nn.Module):
-    def __init__(self, config=None):
+    def __init__(self):
         super().__init__()
-        self.config = config
         self.regression_loss = nn.MSELoss(reduction="none")
 
     def forward(self, input, target, mask):
