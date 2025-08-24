@@ -102,5 +102,5 @@ class ParticleNetwork(nn.Module):
                 mask_b=attn_mask_ctxt,
             )
 
-        fs_out = self.fs_out_net(fs_embd.to(ctxt_embd.dtype), ctxt=global_embd)
+        fs_out = self.fs_out_net(fs_embd.to(ctxt_embd), ctxt=global_embd)
         return fs_out
