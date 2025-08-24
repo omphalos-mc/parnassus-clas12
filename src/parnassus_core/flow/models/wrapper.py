@@ -150,6 +150,7 @@ class FlowLightning(LightningModule):
             )
 
         if not self.lrs_config.get("skip_scheduler"):
+            interval = self.lrs_config.get("interval", "step")
             if self.lrs_config.get("lr_scheduler_type", "cosine") == "warmup_decay":
                 print("Using warmup_decay scheduler")
                 default_scheduler_dict = {
@@ -167,7 +168,7 @@ class FlowLightning(LightningModule):
                         decay_steps=int(default_scheduler_dict["decay_steps"]),
                         min_lr=float(default_scheduler_dict["min_lr"]),
                     ),
-                    "interval": "step",
+                    "interval": interval,
                 }
             elif self.lrs_config.get("lr_scheduler_type", "cosine") == "cosine":
                 print("Using cosine annealing warmup restarts scheduler")
@@ -181,10 +182,13 @@ class FlowLightning(LightningModule):
                 default_scheduler_dict.update(
                     self.lrs_config.get("lr_scheduler_kwargs", {})
                 )
-                scheduler = CosineAnnealingWarmupRestarts(
-                    optimizer,
-                    **default_scheduler_dict,
-                )
+                scheduler = {
+                    "scheduler": CosineAnnealingWarmupRestarts(
+                        optimizer,
+                        **default_scheduler_dict,
+                    ),
+                    "interval": interval,
+                }
             return {"optimizer": optimizer, "lr_scheduler": scheduler}
         print("Skipping learning rate scheduler.")
         return optimizer
