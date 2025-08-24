@@ -33,14 +33,10 @@ class ImpactNetwork(nn.Module):
         self.resnet = resnet
         self.fourier_embedding = fourier_embedding
 
-        self.attn_type = self.encoder.attn_type
-
-        if "flash" in self.attn_type:
-            self.context_manager = torch.amp.autocast(
-                enabled=True, dtype=torch.bfloat16, device_type="cuda"
-            )
-        else:
-            self.context_manager = nullcontext()
+        self.context_manager = nullcontext()
+        self.attn_type = (
+            self.change_backend(encoder.attn_type) if encoder is not None else ""
+        )
 
         hidden_dim = self.time_embedding.hidden_dim
         global_embd_dim = len(self.global_embedding.input_names) * hidden_dim
@@ -54,6 +50,17 @@ class ImpactNetwork(nn.Module):
             return pads_kv[b, kv_idx]
 
         return padding
+
+    def change_backend(self, attn_type: str):
+        if self.encoder is not None:
+            self.attn_type = self.encoder.set_backend(attn_type)
+            if "flash" in self.attn_type:
+                self.context_manager = torch.amp.autocast(
+                    enabled=True, dtype=torch.bfloat16, device_type="cuda"
+                )
+            else:
+                self.context_manager = nullcontext()
+        return self.attn_type
 
     def forward(
         self,
@@ -123,7 +130,7 @@ class ImpactNetwork(nn.Module):
                     mask_b=attn_mask_ctxt,
                 )
         if self.resnet is not None:
-            fs_embd = self.resnet(fs_embd)
+            fs_embd = self.resnet(fs_embd.to(global_embd))
 
         fs_out = self.fs_out_net(fs_embd, ctxt=global_embd)
         return fs_out
