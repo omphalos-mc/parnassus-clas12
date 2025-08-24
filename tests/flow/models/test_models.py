@@ -12,6 +12,7 @@ from parnassus_core.flow.modules import (
 
 from parnassus_core.flow.models.evt_net import EventNetwork
 from parnassus_core.flow.models.part_net import ParticleNetwork
+from parnassus_core.flow.models.imp_net import ImpactNetwork
 
 torch.manual_seed(42)
 
@@ -240,6 +241,96 @@ class TestParticleNetwork:
         fs_data[~fs_mask] *= 1e3
 
         output_new = particle_network(fs_data, timestep, ctxt_dict)
+        assert output_new.shape == fs_data.shape
+
+        assert torch.allclose(
+            output[fs_mask],
+            output_new[fs_mask],
+            atol=1e-3,
+            rtol=1e-3,
+        )
+
+
+class TestImpactNetwork:
+    @pytest.fixture
+    def impact_network(
+        self,
+        time_embedder,
+        fs_init_net,
+        ctxt_networks,
+        global_embedding,
+        transformer_encoder,
+        dense_encoder,
+        fs_out_net,
+    ):
+        return (
+            ImpactNetwork(
+                time_embedding=time_embedder,
+                fs_init_net=fs_init_net,
+                ctxt_networks=ctxt_networks,
+                global_embedding=global_embedding,
+                fs_out_net=fs_out_net,
+                encoder=transformer_encoder,
+                resnet=dense_encoder,
+            )
+            .to(DEVICE)
+            .half()
+        )
+
+    @pytest.mark.parametrize("input_data", ["particle"], indirect=True)
+    def test_impact_network(
+        self,
+        input_data,
+        impact_network,
+    ):
+        fs_data, timestep, ctxt_dict = input_data
+        output = impact_network(fs_data, timestep, ctxt_dict)
+        assert output.shape == fs_data.shape
+
+    @pytest.mark.parametrize("input_data", ["particle"], indirect=True)
+    @pytest.mark.parametrize("attn_type", ["torch", "flex", "flash-varlen"])
+    @pytest.mark.parametrize("attn_type_new", ["torch", "flex", "flash-varlen"])
+    def test_change_backend(
+        self,
+        input_data,
+        attn_type,
+        attn_type_new,
+        impact_network,
+    ):
+        if not HAS_GPU and (
+            attn_type in ATTN_TYPES_GPU or attn_type_new in ATTN_TYPES_GPU
+        ):
+            pytest.skip("Skipping GPU-specific test on CPU-only environment")
+        fs_data, timestep, ctxt_dict = input_data
+        impact_network.change_backend(attn_type)
+        output = impact_network(fs_data, timestep, ctxt_dict)
+        assert output.shape == fs_data.shape
+
+        impact_network.change_backend(attn_type_new)
+        output_new = impact_network(fs_data, timestep, ctxt_dict)
+        assert output_new.shape == fs_data.shape
+
+        assert torch.allclose(output, output_new, atol=1e-3, rtol=1e-3)
+
+    @pytest.mark.parametrize("input_data", ["particle"], indirect=True)
+    @pytest.mark.parametrize("attn_type", ["torch", "flex", "flash-varlen"])
+    def test_masking(
+        self,
+        input_data,
+        attn_type,
+        impact_network,
+    ):
+        if not HAS_GPU and (attn_type in ATTN_TYPES_GPU):
+            pytest.skip("Skipping GPU-specific test on CPU-only environment")
+        fs_data, timestep, ctxt_dict = input_data
+        fs_mask = ctxt_dict["fs_mask"]
+        impact_network.change_backend(attn_type)
+        output = impact_network(fs_data, timestep, ctxt_dict)
+        assert output.shape == fs_data.shape
+
+        fs_data[~fs_mask] *= 1e3
+
+        output_new = impact_network(fs_data, timestep, ctxt_dict)
         assert output_new.shape == fs_data.shape
 
         assert torch.allclose(
