@@ -1,0 +1,36 @@
+eval_path: evals_simple
+
+scale_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/evaluation/configs/var_transform_flash.yaml
+var_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/evaluation/configs/eval_vars.yaml
+
+event_model:
+  # ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/logs/cms2011_event_fm_MSE_20250825-T154555/ckpts/epoch=061-val_loss=0.86894.ckpt"
+  ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/logs/cms2011_event_fm_MSE_20250825-T154555/ckpts/epoch=099-val_loss=0.96482.ckpt"
+  sampler_type: "euler"
+  n_steps: 50
+
+particle_model:
+  ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/logs/cms2011_particle_rcfm_MSEDir_Deep5M_Flex_Simple_20250825-T161212/ckpts/epoch=085-val_loss=0.73668.ckpt"
+  sampler_type: "dpm"
+  n_steps: 40
+
+impact_model:
+  ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/logs/cms2011_impact_fm_MSEDir_FlashSim_20250825-T162621/ckpts/epoch=066-val_loss=0.15972.ckpt"
+  sampler_type: "euler"
+  n_steps: 50
+
+data:
+  top_folder: /storage/agrp/dmitrykl/fastsim/f_delphes/data/full_event/output_impact/
+  datasets:
+    - name: ttbar
+      path: TTJets_MSDecays_central_TuneZ2_7TeV-madgraph-tauola/merged_test_v2_pt025_eta27_ghost.root
+      n_events: 50000
+    - name: h4lep
+      path: GluGluToHToZZTo4L_M-125_7TeV-minloHJJ-pythia6-tauola/merged_test_v2_pt025_eta27_ghost.root
+      n_events: 50000
+    - name: qcd470
+      path: QCD_Pt-470to600_TuneZ2_7TeV_pythia6/merged_test_v2_pt025_eta27_ghost.root
+      n_events: 50000
+    # - name: qcd1000
+    #   path: TTJets_MSDecays_central_TuneZ2_7TeV-madgraph-tauola/merged_test_v2_pt025_eta27_ghost.root
+    #   n_events: 50000

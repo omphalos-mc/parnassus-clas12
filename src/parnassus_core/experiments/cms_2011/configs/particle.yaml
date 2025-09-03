@@ -102,6 +102,7 @@ model:
           attn_type: flex
           bidirectional: true
           do_selfattn: false
+          simplify: false
           mha_config:
             qk_norm: true
             bias: false

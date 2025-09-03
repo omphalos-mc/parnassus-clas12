@@ -23,7 +23,6 @@ trainer:
     - class_path: parnassus_core.flow.callbacks.PredictionWriter
 
 data:
-
   train_type: event
 
   num_train: 2_800_000
@@ -34,7 +33,6 @@ data:
   var_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2011/configs/event_vars.yaml
 
 model:
-
   optimizer: Lion
   optimizer_kwargs:
     lr: 3e-5
@@ -54,7 +52,7 @@ model:
     init_args:
       sigma: 0.0001
       flow_type: fm
-      time_pow: true
+      time_distribution: pow
 
   sampler_type: pndm
   n_steps: 25
