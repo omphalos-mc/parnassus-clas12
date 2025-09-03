@@ -443,7 +443,8 @@ class CMSDataset(Dataset):
         if self.mode != "eval":
             fs_data, fs_mask = self._get_fs_data(idx)
             ctxt_dict["fs_mask"] = fs_mask
-        return fs_data, ctxt_dict
+            return fs_data, ctxt_dict
+        return ctxt_dict
 
 
 class CMSDataModule(LightningDataModule):

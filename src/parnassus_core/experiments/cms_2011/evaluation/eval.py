@@ -19,7 +19,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-c", "--config", type=str, required=True)
 parser.add_argument("-bs", "--batch_size", type=int, default=64)
 parser.add_argument("-ne", "--n_events", type=int)
-parser.add_argument("--prefix", type=str, default="")
+parser.add_argument("--suffix", type=str, default="")
 
 args = parser.parse_args()
 
@@ -35,6 +35,7 @@ def main():
     model.compile_models()
 
     for ds_config in config.data_config.datasets:
+        rprint(f"[bold blue]Evaluating on dataset:[/bold blue] {ds_config.path}")
         eval_subpath = config.eval_path / ds_config.name
         dataset = CMSDataset(
             ds_config.path,
@@ -102,7 +103,7 @@ def main():
                 l_tr_data[key] = l_tr_data[key][:n]
         l_eventNumber = l_eventNumber[:n]
         eval_subpath = eval_subpath.with_stem(
-            eval_subpath.stem + f"_eval_{(n // 1000):d}k.root"
+            eval_subpath.stem + f"_eval_{(n // 1000):d}k{args.suffix}.root"
         )
         with uproot.recreate(eval_subpath) as file:
             file["evt_tree"] = {

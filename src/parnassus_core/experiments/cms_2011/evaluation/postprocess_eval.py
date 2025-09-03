@@ -468,31 +468,55 @@ def main():
 
     output_path = f"{args.output.replace('.root', '')}_{args.n_events // 1000}k_test_eta{int(args.eta * 10)}Eval.root"
     with uproot.recreate(output_path) as f:
-        particle_data = {
-            collection: ak.zip(
-                {
-                    key.replace(f"{collection}_", "", 1): ak.Array(val)
-                    for key, val in out_data_evt.items()
-                    if key.startswith(collection)
-                    and key.replace(f"{collection}_", "", 1) in particle_vars
-                }
-            )
-            for collection in ["truth", "pflow", "fastsim"]
-        }
-        jet_data = {
-            f"{collection}_jets": ak.zip(
-                {
-                    key.replace(f"{collection}_", "", 1): ak.Array(val)
-                    for key, val in out_data_evt.items()
-                    if key.startswith(f"{collection}_jet") and "idx" not in key
-                }
-            )
-            for collection in ["truth", "pflow", "fastsim"]
-        }
-        event_data = {
-            key: ak.Array(val) for key, val in out_data_evt.items() if key in event_vars
-        }
-        f["evt_tree"] = event_data | particle_data | jet_data
+        # Convert to awkward arrays first
+
+        # Write in batches
+        write_batch_size = 1000
+        total_events = len(out_data_evt[next(iter(out_data_evt.keys()))])
+
+        for start_idx in tqdm(
+            range(0, total_events, write_batch_size), desc="Writing to file"
+        ):
+            end_idx = min(start_idx + write_batch_size, total_events)
+            # batch_data = {key: val[start_idx:end_idx] for key, val in all_data.items()}
+            particle_data = {
+                collection: ak.zip(
+                    {
+                        key.replace(f"{collection}_", "", 1): ak.Array(
+                            val[start_idx:end_idx]
+                        )
+                        for key, val in out_data_evt.items()
+                        if key.startswith(collection)
+                        and key.replace(f"{collection}_", "", 1) in particle_vars
+                    }
+                )
+                for collection in ["truth", "pflow", "fastsim"]
+            }
+            jet_data = {
+                f"{collection}_jets": ak.zip(
+                    {
+                        key.replace(f"{collection}_", "", 1): ak.Array(
+                            val[start_idx:end_idx]
+                        )
+                        for key, val in out_data_evt.items()
+                        if key.startswith(f"{collection}_jet") and "idx" not in key
+                    }
+                )
+                for collection in ["truth", "pflow", "fastsim"]
+            }
+            event_data = {
+                key: ak.Array(val[start_idx:end_idx])
+                for key, val in out_data_evt.items()
+                if key in event_vars
+            }
+
+            # Combine all data
+            batch_data = event_data | particle_data | jet_data
+
+            if start_idx == 0:
+                f["evt_tree"] = batch_data
+            else:
+                f["evt_tree"].extend(batch_data)
     print(f"Output saved to {output_path}")
 
 

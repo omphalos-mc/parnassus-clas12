@@ -72,7 +72,9 @@ class EvaluationModel(nn.Module):
         new_data_dict = {}
         var_idx = 0
         for var_name in ["d0", "d0Error", "z0", "z0Error"]:
-            fs_, shift = self.extract_var(fs_data, var_name, var_idx, self.sin_cos)
+            fs_, shift = self.unscaler.extract_var(
+                fs_data, var_name, var_idx, self.sin_cos
+            )
             var_idx += shift
             new_data_dict[f"fs_{var_name}"] = fs_.numpy()
         return new_data_dict
