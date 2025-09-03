@@ -150,7 +150,7 @@ class FlowLightning(LightningModule):
             )
 
         if not self.lrs_config.get("skip_scheduler"):
-            interval = self.lrs_config.get("interval", "step")
+            interval = self.lrs_config.get("interval", "epoch")
             if self.lrs_config.get("lr_scheduler_type", "cosine") == "warmup_decay":
                 print("Using warmup_decay scheduler")
                 default_scheduler_dict = {

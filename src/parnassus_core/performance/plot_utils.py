@@ -238,7 +238,6 @@ class PlotHelper(Generic[SampleT]):
             f"particle_data_{collection}",
             impact_vars,
             bins=bins,
-            xlabel_prefix="Impact parameter ",
             log_scale_vars=log_scale_vars,
             particle_mask_type=particle_mask_type,
         )

@@ -28,3 +28,6 @@ class RMSNorm(torch.nn.Module):
         x = x.float()
         rrms = torch.rsqrt(torch.mean(x**2, dim=-1, keepdim=True) + 1e-6)
         return (x * rrms).to(dtype=x_dtype) * self.scale
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(dim={self.scale.shape[0]})"
