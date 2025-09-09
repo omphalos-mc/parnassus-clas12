@@ -34,6 +34,9 @@ class EventNetwork(nn.Module):
             nn.Linear(global_embd_dim, hidden_dim * 2, bias=True),
         )
 
+    def change_backend(self, backend: str):
+        pass  # For compatibility with ParticleNetwork
+
     def forward(
         self,
         fs_data: torch.Tensor,

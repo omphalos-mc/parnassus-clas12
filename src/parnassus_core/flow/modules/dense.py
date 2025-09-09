@@ -292,8 +292,8 @@ class DenseNetwork(nn.Module):
         if ctxt is not None:
             dim_diff = inputs.dim() - ctxt.dim()
             if dim_diff > 0:
-                ctxt = ctxt.view(ctxt.shape[0], *dim_diff * (1,), *ctxt.shape[1:])
-                ctxt = ctxt.expand(*inputs.shape[:-1], -1)
+                ctxt = ctxt.view(ctxt.size()[0], *dim_diff * (1,), *ctxt.size()[1:])
+                ctxt = ctxt.expand(*inputs.size()[:-1], -1)
 
         # Pass through the input block
         inputs = self.input_block(inputs, ctxt)

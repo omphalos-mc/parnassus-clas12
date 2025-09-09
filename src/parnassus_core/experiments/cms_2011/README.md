@@ -98,3 +98,21 @@ You can also use the following optional flags:
 - `--ip`: If you want to use impact parameters in the postprocessing, you can add this flag (default `False`).
 - `-m [--matching]`: If you want to perform particle matching, you can add this flag (default `False`).
 - `--dr_cut`: Specify the delta R cut for particle matching (default is 0.6).
+
+
+### Exporting Models
+
+To export the trained models to **ONNX** or **Torch** format, you can run the following command from the `src/parnassus_core/experiments/cms_2011/` directory:
+
+```bash
+python export.py \
+    --ckpt <path_to_ckpt> \
+    --config <path_to_config> \
+    --output <output_filename> \
+    --mode <"onnx" or "torch">
+```
+
+Make sure to provide the correct paths to the checkpoint and config files of the trained model you want to export. The exported model will be saved in the specified output filename. Make sure to use `.onnx` extension for ONNX format and `pt2` extension for Torch format.
+
+[!WARNING]
+For unknown reasons, particle- and impact-level models shows some discrepancies between the original and exported models. This is still under investigation.

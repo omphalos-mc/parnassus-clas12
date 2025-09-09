@@ -9,15 +9,15 @@ class FourierBase2Embedding(nn.Module):
         self.start = start
         self.stop = stop
         self.step = step
-        self.freqs_exp = T.arange(start, stop, step, dtype=T.float32)
+        freqs_exp = T.arange(start, stop, step, dtype=T.float32)
+        self.register_buffer("freqs_exp", freqs_exp, persistent=False)
 
     def forward(self, inputs):
         # Create Base 2 Fourier features
-        freqs_exp = self.freqs_exp.to(inputs.device, dtype=inputs.dtype)
+        freqs_exp = self.freqs_exp.to(inputs.dtype)
         freqs = 2.0**freqs_exp * 2 * T.pi
-        freqs = freqs.view(
-            -1, *[1] * (inputs.ndim - 1)
-        )  # Reshape to match inputs shape
+        ndim = len(inputs.size())
+        freqs = freqs.view(-1, *[1] * (ndim - 1))  # Reshape to match inputs shape
         # Compute features
         features = inputs.unsqueeze(1) * freqs  # Broadcasting multiplication
         features = features.transpose(1, 2).flatten(-2, -1)
@@ -93,7 +93,7 @@ class TimestepEmbedder(nn.Module):
         # https://github.com/openai/glide-text2im/blob/main/glide_text2im/nn.py
         t = t * time_factor
 
-        args = t[:, None].float() * self.freqs[None]
+        args = t.unsqueeze(1).float() * self.freqs.unsqueeze(0)
         embedding = T.cat([T.cos(args), T.sin(args)], dim=-1)
         if self.frequency_embedding_size % 2:
             embedding = T.cat([embedding, T.zeros_like(embedding[:, :1])], dim=-1)
@@ -133,11 +133,8 @@ class GlobalContextEmbedding(nn.Module):
                 if mask_dict and mask_name in mask_dict:
                     mask = mask_dict[mask_name]
                     numerator = T.sum(embd * mask.unsqueeze(-1), dim=1)
-                    denominator = T.sum(mask, dim=1, keepdim=True)
-                    if denominator.sum() > 0:
-                        embd = numerator / denominator
-                    else:
-                        embd = T.zeros_like(numerator)
+                    denominator = T.sum(mask, dim=1, keepdim=True).to(numerator.dtype)
+                    embd = numerator / (denominator + 1e-8)
                 elif embd.dim() == 3:
                     embd = T.mean(embd, dim=1)
                 ctxt_embd.append(embd)

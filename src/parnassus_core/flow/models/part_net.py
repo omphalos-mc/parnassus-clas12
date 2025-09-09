@@ -73,7 +73,7 @@ class ParticleNetwork(nn.Module):
         ctxt_embd = ctxt_embd * ctxt_mask.unsqueeze(-1)
 
         if self.attn_type == "flex":
-            B, S = fs_mask.shape
+            B, S = fs_mask.size()
             attn_mask_ctxt = create_block_mask(
                 self.create_padding_mask(ctxt_mask),
                 B=B,
@@ -101,6 +101,5 @@ class ParticleNetwork(nn.Module):
                 mask_a=attn_mask_fs,
                 mask_b=attn_mask_ctxt,
             )
-
-        fs_out = self.fs_out_net(fs_embd.to(ctxt_embd), ctxt=global_embd)
+        fs_out = self.fs_out_net(fs_embd.to(global_embd.dtype), ctxt=global_embd)
         return fs_out

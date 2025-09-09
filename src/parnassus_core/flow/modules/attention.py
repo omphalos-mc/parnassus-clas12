@@ -41,7 +41,6 @@ def merge_masks(
     attn_mask: BoolTensor | None,
     q_shape: Size,
     k_shape: Size,
-    device: torch.device,
 ) -> BoolTensor:
     """Create a full attention mask which incoporates the padding information.
     Modified from https://gitlab.cern.ch/atlas-flavor-tagging-tools/algorithms/salt/-/blob/main/salt/models/attention.py?ref_type=heads
@@ -53,10 +52,13 @@ def merge_masks(
     # If either pad mask exists, create
     if q_mask is not None or kv_mask is not None:
         if q_mask is None:
-            q_mask = torch.full(q_shape[:-1], True, device=device)
-        if kv_mask is None:
-            kv_mask = torch.full(k_shape[:-1], True, device=device)
-        merged_mask = q_mask.unsqueeze(-1) & kv_mask.unsqueeze(-2)
+            # q_mask = torch.ones(q_shape[:-1], dtype=torch.bool).to(kv_mask.device)
+            merged_mask = kv_mask.unsqueeze(-2).expand(-1, q_shape[1], -1)
+        elif kv_mask is None:
+            # kv_mask = torch.ones(k_shape[:-1], dtype=torch.bool).to(q_mask.device)
+            merged_mask = q_mask.unsqueeze(-1).expand(-1, -1, k_shape[1])
+        else:
+            merged_mask = q_mask.unsqueeze(-1) & kv_mask.unsqueeze(-2)
 
     # If attention mask exists then it must be included
     if attn_mask is not None:
@@ -294,11 +296,11 @@ class Attention(nn.Module):
         """
         if kv is None:
             # If self-attention, we use the same tensor for q, k, and v
-            q_shape = kv_shape = q.shape
+            q_shape = kv_shape = q.size()
         else:
             # If cross-attention, we expect q and kv to be different tensors
-            q_shape = q.shape
-            kv_shape = kv.shape
+            q_shape = q.size()
+            kv_shape = kv.size()
 
         # Check that the specified attention backend actualy supports kv masking / jagged inputs
         if kv_mask is not None:
@@ -320,9 +322,7 @@ class Attention(nn.Module):
         if self.attn_type == "flex":
             out = self.attn(q, k, v, block_mask=attn_mask, score_mod=score_mod)
         elif self.attn_type == "torch":
-            attn_mask = merge_masks(
-                q_mask, kv_mask, attn_mask, q_shape, kv_shape, q.device
-            )
+            attn_mask = merge_masks(q_mask, kv_mask, attn_mask, q_shape, kv_shape)
             # Have to expand the attention mask so that it is broadcasted over the head dimension
             if attn_mask is not None and attn_mask.dim() == 3:
                 attn_mask = attn_mask.unsqueeze(-3)

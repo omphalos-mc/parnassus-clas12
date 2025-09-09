@@ -89,8 +89,8 @@ class ImpactNetwork(nn.Module):
             scale_mlp,
         ) = self.adaLN_modulation(global_embd).chunk(2, dim=-1)
 
-        scale_mlp = scale_mlp.view(-1, 1, fs_embd.shape[-1])
-        shift_mlp = shift_mlp.view(-1, 1, fs_embd.shape[-1])
+        scale_mlp = scale_mlp.view(-1, 1, fs_embd.size(-1))
+        shift_mlp = shift_mlp.view(-1, 1, fs_embd.size(-1))
         fs_embd = (1 + scale_mlp) * fs_embd + shift_mlp
 
         fs_embd = fs_embd * fs_mask.unsqueeze(-1)
@@ -130,7 +130,7 @@ class ImpactNetwork(nn.Module):
                     mask_b=attn_mask_ctxt,
                 )
         if self.resnet is not None:
-            fs_embd = self.resnet(fs_embd.to(global_embd))
+            fs_embd = self.resnet(fs_embd.to(global_embd.dtype))
 
         fs_out = self.fs_out_net(fs_embd, ctxt=global_embd)
         return fs_out
