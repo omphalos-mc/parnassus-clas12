@@ -1,4 +1,5 @@
 # Based on source code from: https://github.com/samvanstroud/hepattn
+from unittest.mock import patch
 import pytest
 import torch
 from torch import nn
@@ -6,6 +7,7 @@ from torch.nn.attention.flex_attention import create_block_mask
 from parnassus_core.flow.modules.attention import (
     ATTN_MASK_ATTN_TYPES,
     VARLEN_ATTN_TYPES,
+    FLASH_ATTN_TYPES,
     Attention,
 )
 
@@ -302,6 +304,10 @@ def test_cross_attention(attn_type):
 def test_attention_change_backend(attn_type, attn_type_new):
     if not HAS_GPU and (attn_type in ATTN_TYPES_GPU or attn_type_new in ATTN_TYPES_GPU):
         pytest.skip("Skipping GPU-specific test on CPU-only environment")
+    if torch.cuda.get_device_properties(0).major < 8 and (
+        attn_type in FLASH_ATTN_TYPES or attn_type_new in FLASH_ATTN_TYPES
+    ):
+        pytest.skip("Skipping flash attention test on unsupported GPU architecture")
     # Generate random input tensors
     q = torch.randn(1, 128, 128, dtype=torch.float16, device=DEVICE)
     kv = torch.randn(1, 128, 128, dtype=torch.float16, device=DEVICE)
@@ -332,3 +338,21 @@ def test_attention_change_backend(attn_type, attn_type_new):
 
     # Check that the outputs are consistent
     torch.testing.assert_close(out, out_new, atol=1e-3, rtol=1e-3)
+
+
+@pytest.mark.parametrize("attn_type", FLASH_ATTN_TYPES)
+@pytest.mark.parametrize("has_gpu", [True, False])
+def test_attention_torch_fallback(attn_type, has_gpu):
+    """If flash attention is not available, it should fallback to torch."""
+
+    class MockProps:
+        major = 5
+        minor = 0
+
+    with (
+        patch("torch.cuda.get_device_properties", return_value=MockProps())
+        if has_gpu
+        else patch("torch.cuda.is_available", return_value=False)
+    ):
+        attn = Attention(dim=128, num_heads=8, attn_type=attn_type)
+    assert attn.attn_type == "torch"

@@ -1,8 +1,10 @@
 from dataclasses import dataclass
+from typing import Literal
 from torch import Tensor
 import torch.nn as nn
 
 from parnassus_core.flow.modules.attention import Attention
+from parnassus_core.flow.modules.norms import RMSNorm, LayerNorm
 
 
 class GLU(nn.Module):
@@ -102,14 +104,23 @@ class DiTLayer(nn.Module):
         mlp_ratio: float = 4.0,
         ctxt_ratio: float = 3.0,
         simplify: bool = False,
+        norm: Literal["rms", "layer"] = "rms",
     ):
         super().__init__()
         self.simplify = simplify
-
-        self.norm1 = nn.LayerNorm(hidden_dim, elementwise_affine=False)
-        self.norm_k = nn.LayerNorm(hidden_dim, elementwise_affine=False)
+        if norm == "layer":
+            norm_layer = LayerNorm
+        elif norm == "rms":
+            norm_layer = RMSNorm
+        else:
+            raise ValueError(
+                f"Unknown norm type: {norm}, onyr 'rms' and 'layer' are supported."
+            )
+        self.norm1 = norm_layer(hidden_dim)
+        self.norm_k = norm_layer(hidden_dim)
         if not simplify:
-            self.norm2 = nn.LayerNorm(hidden_dim, elementwise_affine=False)
+            # self.norm2 = nn.LayerNorm(hidden_dim, elementwise_affine=False)
+            self.norm2 = norm_layer(hidden_dim)
             mlp_hidden_dim = int(hidden_dim * mlp_ratio)
             self.mlp = GLU(hidden_dim, mlp_hidden_dim, bias=False, gated=True)
         self.adaLN_modulation = Modulation(
@@ -180,6 +191,7 @@ class DiTBlock(nn.Module):
         bidirectional=False,
         do_selfattn=False,
         simplify=False,
+        norm: Literal["rms", "layer"] = "rms",
     ):
         super().__init__()
         self.bidirectional = bidirectional
@@ -192,6 +204,7 @@ class DiTBlock(nn.Module):
             "mlp_ratio": mlp_ratio,
             "ctxt_ratio": ctxt_ratio,
             "simplify": simplify,
+            "norm": norm,
         }
 
         if do_selfattn:
@@ -254,6 +267,7 @@ class DiTEncoder(nn.Module):
         do_selfattn: bool = False,
         bidirectional: bool = True,
         simplify: bool = False,
+        norm: Literal["rms", "layer"] = "rms",
     ):
         super().__init__()
         self.attn_type = attn_type
@@ -277,6 +291,7 @@ class DiTEncoder(nn.Module):
                     bidirectional=bidirectional and i != num_layers - 1,
                     do_selfattn=do_selfattn,
                     simplify=simplify,
+                    norm=norm,
                 )
                 for i in range(num_layers)
             ]

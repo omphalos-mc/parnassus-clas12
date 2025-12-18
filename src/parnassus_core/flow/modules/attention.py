@@ -115,7 +115,7 @@ class Attention(nn.Module):
             self.q_norm = RMSNorm(dim)
             self.k_norm = RMSNorm(dim)
         if self.v_norm:
-            self.v_norm = RMSNorm(dim)
+            self.v_norm_layer = RMSNorm(dim)
 
         self.reset_parameters()
         self.set_backend(attn_type, torch_compile=torch_compile)
@@ -129,10 +129,20 @@ class Attention(nn.Module):
 
     def set_backend(self, attn_type: str, torch_compile: bool = False) -> str:
         # Allow to change the attention backend after initialization, when evaluating the model
-
-        self.attn_type = attn_type
         if attn_type not in ATTN_TYPES:
             raise ValueError(f"Invalid attention type: {attn_type}")
+        # Check gpu comptability with flash attention and revert to torch if not
+        if attn_type in FLASH_ATTN_TYPES:
+            if (
+                not torch.cuda.is_available()
+                or torch.cuda.get_device_properties(0).major < 8
+            ):
+                print(
+                    "Warning: Flash attention requires an NVIDIA GPU with compute capability >= 8.0, reverting to torch attention."
+                )
+                attn_type = "torch"
+
+        self.attn_type = attn_type
         self.attn = ATTN_TYPES[attn_type]
 
         if torch_compile or attn_type == "flex":
@@ -213,7 +223,7 @@ class Attention(nn.Module):
             q = self.q_norm(q)
             k = self.k_norm(k)
         if self.v_norm:
-            v = self.v_norm(v)
+            v = self.v_norm_layer(v)
 
         # Separate into heads, output shape is (batch, head, seq, head_dim)
         q = self.separate_heads(q, self.num_heads)
@@ -237,7 +247,7 @@ class Attention(nn.Module):
         kv_mask: BoolTensor | None = None,
     ) -> Tensor:
         # TODO: Implement a packed version for the self attention case
-        bs = q.shape[0]
+        bs, seqlen = q.shape[0], q.shape[1]
         # Undo padding
         if q_mask is None:
             q_mask = torch.ones((bs, q.shape[1]), dtype=torch.bool, device=q.device)
@@ -258,9 +268,7 @@ class Attention(nn.Module):
         )
 
         # Redo padding
-        out = pad_input(out, indices_q, bs, max_seqlen_q)
-
-        out = out.view(bs, -1, self.dim)
+        out = pad_input(out, indices_q, bs, seqlen=seqlen)
 
         return out
 

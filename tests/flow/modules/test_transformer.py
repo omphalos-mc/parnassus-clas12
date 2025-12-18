@@ -6,6 +6,7 @@ from parnassus_core.flow.modules.transformer import (
     CADiTLayer,
     DiTEncoder,
 )
+from parnassus_core.flow.modules.norms import LayerNorm, RMSNorm
 
 HAS_GPU = torch.cuda.is_available()
 ATTN_TYPES_GPU = {"flex", "flash", "flash-varlen"}
@@ -30,6 +31,27 @@ def test_glu_forward(gated: bool):
 
 
 MHA_CONFIG = {"attn_type": "torch"}
+
+
+@pytest.mark.parametrize("norm", ["layer", "rms"])
+def test_dit_norm(norm: str):
+    x = torch.randn(2, 10, 16, device=DEVICE)
+    ctxt = torch.randn(2, 32, device=DEVICE)
+    layer = SADiTLayer(
+        hidden_dim=16,
+        num_heads=4,
+        mlp_ratio=2.0,
+        ctxt_ratio=2.0,
+        norm=norm,
+        mha_config=MHA_CONFIG,
+    ).to(DEVICE)
+    match norm:
+        case "layer":
+            assert isinstance(layer.norm1, LayerNorm)
+        case "rms":
+            assert isinstance(layer.norm1, RMSNorm)
+    out = layer(x, ctxt=ctxt)
+    assert out.shape == x.shape
 
 
 @pytest.mark.parametrize("simplify", [False, True])

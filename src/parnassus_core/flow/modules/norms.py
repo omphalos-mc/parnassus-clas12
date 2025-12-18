@@ -18,6 +18,18 @@ class LayerScale(nn.Module):
         return x.mul_(self.gamma) if self.inplace else x * self.gamma
 
 
+class LayerNorm(nn.Module):
+    def __init__(self, dim: int):
+        super().__init__()
+        self.norm = nn.LayerNorm(dim, elementwise_affine=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.norm(x)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(dim={self.norm.normalized_shape[0]})"
+
+
 class RMSNorm(torch.nn.Module):
     def __init__(self, dim: int):
         super().__init__()
