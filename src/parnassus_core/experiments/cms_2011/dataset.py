@@ -11,6 +11,7 @@ from tqdm import tqdm
 from parnassus_core.flow.utils.scaling import FeatureScaler
 
 from lightning.pytorch import LightningDataModule
+from .dataset_h5 import CMSDatasetHDF5, RandomBatchSampler
 
 ###  0: charged hadrons
 ###  1: electrons
@@ -498,19 +499,24 @@ class CMSDataModule(LightningDataModule):
         self.fs_mask_type = fs_mask_type
 
     def setup_dataset(self, path: str, num_events: int, entry_start: int, mode: str):
-        return CMSDataset(
-            filename=path,
-            max_particles=self.max_particles,
-            train_type=self.train_type,
-            sin_cos=self.sin_cos,
-            zero_neutral_vtx=self.zero_neutral_vtx,
-            scale_dict=self.scale_dict,
-            var_dict=self.var_dict,
-            fs_mask_type=self.fs_mask_type,
-            reduce_ds=num_events,
-            entry_start=entry_start,
-            mode=mode,
-        )
+        args = {
+            "filename": path,
+            "max_particles": self.max_particles,
+            "train_type": self.train_type,
+            "sin_cos": self.sin_cos,
+            "zero_neutral_vtx": self.zero_neutral_vtx,
+            "scale_dict": self.scale_dict,
+            "var_dict": self.var_dict,
+            "fs_mask_type": self.fs_mask_type,
+            "reduce_ds": num_events,
+            "entry_start": entry_start,
+            "mode": mode,
+        }
+        if path.endswith(".root"):
+            return CMSDataset(**args)
+        elif path.endswith(".h5"):
+            return CMSDatasetHDF5(**args)
+        raise ValueError(f"Expected file to end with .h5 or .root, got {path}")
 
     def setup(self, stage: str = None):
         if self.trainer.is_global_zero:
@@ -551,13 +557,28 @@ class CMSDataModule(LightningDataModule):
                 print(f"Created test dataset with {len(self.test_dset):,} events")
             print("-" * 100, "\n")
 
-    def get_dataloader(self, dataset: CMSDataset, shuffle: bool, batch_size: int):
+    def get_dataloader(
+        self,
+        dataset: CMSDataset | CMSDatasetHDF5,
+        shuffle: bool,
+        batch_size: int | None,
+    ):
         print(f"Creating dataloader with {len(dataset):,} events")
+        sampler = None
+        if isinstance(dataset, CMSDatasetHDF5) and batch_size is not None:
+            sampler = RandomBatchSampler(
+                dataset,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                entry_start=dataset.entry_start,
+            )
+            shuffle = False  # Sampler already shuffles
+            batch_size = None  # Sampler defines batch size
         return DataLoader(
             dataset=dataset,
             batch_size=batch_size,
             collate_fn=None,
-            sampler=None,
+            sampler=sampler,
             num_workers=self.num_workers,
             shuffle=shuffle,
             pin_memory=False,
