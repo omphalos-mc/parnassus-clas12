@@ -12,6 +12,9 @@ from tqdm import tqdm
 
 MAX_PARTICLES = 400
 
+INT_VARIABLES = {"pdgId"}
+SHORT_VARIABLES = {"class", "label"}
+
 
 def get_parser():
     """
@@ -28,7 +31,7 @@ def get_parser():
         "--input",
         type=str,
         required=True,
-        help="Enter the name of the input file.",
+        help="Enter the name of the input file or directory containing .root files.",
     )
 
     parser.add_argument(
@@ -65,6 +68,15 @@ def get_parser():
         required=False,
         default=10_000,
         help="Enter the batch size for processing events. Used to write data in chunks.",
+    )
+
+    parser.add_argument(
+        "-nf",
+        "--num_files",
+        type=int,
+        required=False,
+        default=None,
+        help="Number of files to load from directory (default: all files).",
     )
 
     return parser.parse_args()
@@ -125,8 +137,15 @@ class PrepareSamples:
             preprocessing configuration class containing all info about preprocessing
         """
         self.input = Path(args.input)
+
+        # Get list of input files (single file or all .root files in directory)
+        self.input_files = self._get_input_files(self.input, args.num_files)
+
         if args.output is None:
-            self.output = self.input.with_suffix(".h5")
+            if self.input.is_dir():
+                self.output = self.input / "output.h5"
+            else:
+                self.output = self.input.with_suffix(".h5")
         else:
             self.output = Path(args.output)
 
@@ -134,49 +153,159 @@ class PrepareSamples:
         self.max_particles = args.max_particles
         self.batch_size = args.batch_size
 
-        self.data_map, total_events = self.get_metadata(self.input)
+        self.data_map, total_events = self.get_metadata(self.input_files)
         if self.n_events is None or self.n_events > total_events:
             self.n_events = total_events
 
-    def get_metadata(self, filename: str | Path) -> tuple[TreeMap, int]:
-        """
-        Get the data map from the ROOT file.
+    def _get_input_files(
+        self, input_path: Path, num_files: int | None = None
+    ) -> list[Path]:
+        """Get list of input ROOT files.
 
         Parameters
         ----------
-        filename : str | Path
-            Path to the ROOT file.
+        input_path : Path
+            Path to a single file or directory containing .root files.
+        num_files : int | None
+            Maximum number of files to load from directory. If None, loads all files.
+            Only applies when input_path is a directory.
+
+        Returns
+        -------
+        list[Path]
+            List of ROOT file paths.
+        """
+        if input_path.is_file():
+            return [input_path]
+        elif input_path.is_dir():
+            root_files = sorted(input_path.glob("*.root"))
+            if not root_files:
+                raise ValueError(f"No .root files found in directory: {input_path}")
+
+            # Limit number of files if specified
+            if num_files is not None and num_files > 0:
+                root_files = root_files[:num_files]
+                print(
+                    f"Loading {len(root_files)} of {len(sorted(input_path.glob('*.root')))} .root files from {input_path}"
+                )
+            else:
+                print(f"Found {len(root_files)} .root files in {input_path}")
+
+            return root_files
+        else:
+            raise ValueError(f"Input path does not exist: {input_path}")
+
+    def get_metadata(self, filenames: list[Path]) -> tuple[TreeMap, int]:
+        """
+        Get the data map from the ROOT file(s).
+
+        Parameters
+        ----------
+        filenames : list[Path]
+            List of paths to ROOT files.
         Returns
         -------
         tuple[TreeMap, int]
-            The TreeMap object and the total number of entries in the tree.
+            The TreeMap object and the total number of entries across all files.
         """
-        with uproot.open(filename) as rootfile:  # type: ignore
+        # Get metadata from the first file
+        with uproot.open(filenames[0]) as rootfile:  # type: ignore
             tree = rootfile.keys()[0]  # get first tree
             tree_obj = rootfile[tree]
             tree_keys = tree_obj.keys()
-            return TreeMap.create(tree, tree_keys), tree_obj.num_entries
+            tree_map = TreeMap.create(tree, tree_keys)
+
+        # Count total events across all files
+        total_events = 0
+        for filename in filenames:
+            with uproot.open(filename) as rootfile:  # type: ignore
+                tree_obj = rootfile[tree_map.tree_name]
+                total_events += tree_obj.num_entries
+
+        print(f"Total events across {len(filenames)} file(s): {total_events}")
+        return tree_map, total_events
 
     def _load_events(
-        self, filename: str | Path, start: int, end: int
+        self, filenames: list[Path], start: int, end: int
     ) -> dict[str, np.ndarray | dict[str, np.ndarray]]:
-        with uproot.open(filename) as rootfile:
-            tree_name = self.data_map.tree_name
-            tree = rootfile[tree_name]
-            arrays = tree.arrays(
-                entry_start=start,
-                entry_stop=end,
-                library="np",
-            )
-            tree_data = {}
-            for global_var in self.data_map.global_vars:
-                tree_data[global_var] = arrays[global_var]
-            for constituent_name, var_names in self.data_map.constituents.items():
-                constituent_arrays = {
-                    var_name: arrays[f"{constituent_name}_{var_name}"]
-                    for var_name in var_names
-                }
-                tree_data[constituent_name] = constituent_arrays
+        """Load events from ROOT file(s).
+
+        For a single file, loads events from start to end index.
+        For multiple files, loads ALL events from ALL files (ignores start/end).
+
+        Parameters
+        ----------
+        filenames : list[Path]
+            List of ROOT file paths.
+        start : int
+            Starting event index (only used for single file).
+        end : int
+            Ending event index (only used for single file).
+
+        Returns
+        -------
+        dict
+            Dictionary containing the loaded and concatenated event data.
+        """
+        tree_name = self.data_map.tree_name
+        tree_data = {}
+
+        # For multiple files, load all events from all files
+        if len(filenames) > 1:
+            print(f"Loading all events from {len(filenames)} files...")
+            for file_idx, filename in enumerate(tqdm(filenames, desc="Loading files")):
+                with uproot.open(filename) as rootfile:  # type: ignore
+                    tree = rootfile[tree_name]
+                    arrays = tree.arrays(library="np")
+
+                    # Initialize or concatenate global variables
+                    for global_var in self.data_map.global_vars:
+                        if file_idx == 0:
+                            tree_data[global_var] = arrays[global_var]
+                        else:
+                            tree_data[global_var] = np.concatenate(
+                                (tree_data[global_var], arrays[global_var])
+                            )
+
+                    # Initialize or concatenate constituent arrays
+                    for (
+                        constituent_name,
+                        var_names,
+                    ) in self.data_map.constituents.items():
+                        if file_idx == 0:
+                            tree_data[constituent_name] = {
+                                var_name: arrays[f"{constituent_name}_{var_name}"]
+                                for var_name in var_names
+                            }
+                        else:
+                            for var_name in var_names:
+                                tree_data[constituent_name][var_name] = np.concatenate(
+                                    (
+                                        tree_data[constituent_name][var_name],
+                                        arrays[f"{constituent_name}_{var_name}"],
+                                    )
+                                )
+        else:
+            # For a single file, use start/end indices
+            with uproot.open(filenames[0]) as rootfile:  # type: ignore
+                tree = rootfile[tree_name]
+                arrays = tree.arrays(
+                    entry_start=start,
+                    entry_stop=end,
+                    library="np",
+                )
+
+                # Initialize global variables
+                for global_var in self.data_map.global_vars:
+                    tree_data[global_var] = arrays[global_var]
+
+                # Initialize constituent arrays
+                for constituent_name, var_names in self.data_map.constituents.items():
+                    tree_data[constituent_name] = {
+                        var_name: arrays[f"{constituent_name}_{var_name}"]
+                        for var_name in var_names
+                    }
+
         return tree_data
 
     def _convert_events(self, events):
@@ -220,17 +349,29 @@ class PrepareSamples:
                             ),
                             (0, max_size - len(arr[i][:max_size])),
                             "constant",
-                            constant_values=np.nan if key != "class" else 0,
+                            constant_values=0
+                            if key in INT_VARIABLES | SHORT_VARIABLES
+                            else np.nan,
                         )
                         if arr[i].size > 0
-                        else [np.nan for _ in range(max_size)]
+                        else [
+                            0 if key in INT_VARIABLES | SHORT_VARIABLES else np.nan
+                            for _ in range(max_size)
+                        ]
                         for i in range(
                             start_index, end_index if end_index else arr.shape[0]
                         )
                     ]
                 )
             )
-            dtypes.append((key, "f4"))
+            dtypes.append(
+                (
+                    key,
+                    "f4"
+                    if key not in INT_VARIABLES | SHORT_VARIABLES
+                    else ("i4" if key in INT_VARIABLES else "i2"),
+                )
+            )
         # create valid mask
         output.append(np.isfinite(output[0]) * 1)
         dtypes.append(("valid", "bool"))
@@ -249,7 +390,7 @@ class PrepareSamples:
         """Run the preprocessing to convert ROOT to HDF5."""
         # load data
         print("Loading data...")
-        tree_data = self._load_events(self.input, 0, self.n_events)
+        tree_data = self._load_events(self.input_files, 0, self.n_events)
         print("Converting and writing data...")
         batch_indices = [
             (i, min(i + self.batch_size, self.n_events))
@@ -345,7 +486,7 @@ class PrepareSamples:
 
         # Process each batch
         # Load ROOT data for this batch range
-        tree_data = self._load_events(self.input, start_index, end_index)
+        tree_data = self._load_events(self.input_files, start_index, end_index)
 
         # Load HDF5 data for this batch
         with h5py.File(self.output, "r") as h5file:
@@ -418,5 +559,6 @@ if __name__ == "__main__":
 
     preparation_tool = PrepareSamples(args=args)
     preparation_tool.run()
-    for _ in range(3):
-        preparation_tool.validate(batch_size=1000)
+
+    # for _ in range(3):
+    #     preparation_tool.validate(batch_size=1000)

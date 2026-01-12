@@ -1,0 +1,33 @@
+# Example YAML configuration for submit_cms_to_root.py
+#
+# This configuration file defines how to organize and process CMS ROOT files
+# for conversion using the cms_to_root preprocessing tool.
+
+# Base directory where input files are located
+source_top_dir: /storage/agrp/dmitrykl/fastsim/f_delphes/data/full_event/raw_train_2012/MonteCarlo2012/Summer12_DR53X/
+
+# Base directory where output files will be written
+target_top_dir: /storage/agrp/dmitrykl/fastsim/f_delphes/data/full_event/output_train_2012
+
+# Optional: Directory for PBS logs and job scripts (default: ./pbs_logs)
+log_dir: ./pbs_logs
+
+# File organization: group names map to lists of input files (relative to source_top_dir)
+# Group names become subdirectories under target_top_dir
+# Supports nested groups like "group1/subgroup2"
+files:
+  DYJetsToLL_M-50_TuneZ2Star_8TeV-madgraph-tarball: !include train_2012/dy_events.yaml
+  QCD_Pt-15to3000_TuneZ2star_Flat_8TeV_pythia6: !include train_2012/qcd_events.yaml
+  TTJets_MSDecays_central_TuneZ2star_8TeV-madgraph-tauola: !include train_2012/ttbar_events.yaml
+# Processing parameters applied to all cms_to_root jobs
+processing_params:
+  pt_cut: 0.25 # pT cut for truth particles (GeV)
+  eta: 2.7 # Eta cut
+  num_events: -1 # Number of events to process (-1 = all)
+
+# PBS job parameters
+pbs_params:
+  walltime: "1:00:00" # Job time limit
+  mem: "2g" # Memory allocation
+  io: "2" # I/O limit
+  # queue: "shortE" # PBS queue name

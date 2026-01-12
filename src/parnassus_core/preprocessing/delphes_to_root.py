@@ -1,6 +1,7 @@
 import argparse
 
 import numpy as np
+from tqdm import tqdm
 import uproot
 import awkward as ak
 
@@ -57,6 +58,13 @@ def load_data(filepath, entry_stop=None):
                 truth_data[key.replace("truth_", "")] = arr
             else:
                 pflow_data[key.replace("pflow_", "")] = arr
+        # Scaling impact parameters and vertex positions from MM to CM
+        for i in range(len(truth_data["pt"])):
+            for var in ["d0", "d0Error", "z0", "z0Error", "vx", "vy", "vz"]:
+                if var in pflow_data:
+                    pflow_data[var][i] /= 10.0
+                if var in truth_data:
+                    truth_data[var][i] /= 10.0
         event_number = np.concatenate(
             tree["Event/Event.Number"].array(library="np", entry_stop=entry_stop)
         )
@@ -77,15 +85,43 @@ truth_data, pflow_data, event_number = load_data(
 prefix = args.input.split("/")[-1].split(".")[0]
 output_path = args.input.replace(prefix, "delphes_" + prefix)
 total_entries = len(truth_data["pt"])
-
 print(f"Converting {total_entries}...")
+batch_size = 1000
+batch_indices = list(range(0, total_entries, batch_size)) + [total_entries]
 with uproot.recreate(output_path) as f:
-    f["evt_tree"] = {
-        "truth": ak.zip(
-            {key: ak.Array(truth_data[key].tolist()) for key in truth_data.keys()}
-        ),
-        "pflow": ak.zip(
-            {key: ak.Array(pflow_data[key].tolist()) for key in pflow_data.keys()}
-        ),
-        "eventNumber": ak.Array(event_number),
-    }
+    for start, end in tqdm(
+        zip(batch_indices[:-1], batch_indices[1:]),
+        desc="Writing batches",
+        total=len(batch_indices) - 1,
+    ):
+        truth_dict = ak.zip(
+            {
+                key: ak.values_astype(
+                    ak.Array(truth_data[key][start:end].tolist()), np.float32
+                )
+                for key in truth_data.keys()
+            }
+        )
+        pflow_dict = ak.zip(
+            {
+                key: ak.values_astype(
+                    ak.Array(pflow_data[key][start:end].tolist()), np.float32
+                )
+                for key in pflow_data.keys()
+            }
+        )
+        event_number_array = ak.Array(event_number[start:end])
+        if start == 0:
+            f["evt_tree"] = {
+                "truth": truth_dict,
+                "pflow": pflow_dict,
+                "eventNumber": event_number_array,
+            }
+        else:
+            f["evt_tree"].extend(
+                {
+                    "truth": truth_dict,
+                    "pflow": pflow_dict,
+                    "eventNumber": event_number_array,
+                }
+            )

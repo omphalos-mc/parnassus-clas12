@@ -109,6 +109,9 @@ cython_debug/
 pbs/
 logs
 logs/
+*.log
+*.err
+*.out
 
 # Extra
 target
@@ -133,3 +136,7 @@ evals
 
 # NFS
 *.nfs*
+
+# Allow pbs
+!src/parnassus_core/preprocessing/pbs/*.py
+!src/parnassus_core/preprocessing/pbs/*.yaml
