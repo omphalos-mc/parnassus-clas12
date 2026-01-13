@@ -217,18 +217,18 @@ class CMSDatasetHDF5(Dataset):
             elif var == "npflow" and pflow_data is not None:
                 x = pflow_data["npart"].float().view(-1, 1)
                 ctxt_global_data.append(
-                    self.feature_scaler[var_scale_name].transform(x)
+                    self.feature_scaler["npart"].transform(x)
                 )
             elif var == "ntruth":
                 x = truth_data["npart"].float().view(-1, 1)
                 ctxt_global_data.append(
-                    self.feature_scaler[var_scale_name].transform(x)
+                    self.feature_scaler["npart"].transform(x)
                 )
             elif var == "means":
                 means = self._calculate_means(truth_data)
         ctxt_global_data = torch.cat(ctxt_global_data, dim=-1)
         if means is not None:
-            ctxt_global_data = torch.cat([ctxt_global_data, means], dim=-1)
+            ctxt_global_data = torch.cat([means, ctxt_global_data], dim=-1)
         return ctxt_global_data
 
     def _get_ctxt_data(
