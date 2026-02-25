@@ -1,4 +1,5 @@
 import argparse
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast, final
@@ -10,10 +11,37 @@ import uproot
 from numpy.lib.recfunctions import unstructured_to_structured
 from tqdm import tqdm
 
-MAX_PARTICLES = 400
+## Example ROOT file structure:
+#  Branches:
+#    ntruth           ->  int32_t
+#    truth_pt         ->  float[]
+#    truth_eta        ->  float[]
+#    truth_phi        ->  float[]
+#    truth_class      ->  int32_t[]
+#    npflow           ->  int32_t
+#    pflow_pt         ->  float[]
+#    pflow_eta        ->  float[]
+#    pflow_phi        ->  float[]
+#    pflow_class      ->  int32_t[]
+#    nhadrons         ->  int32_t
+#    hadrons_pt       ->  float[]
+#    hadrons_eta      ->  float[]
+#    hadrons_phi      ->  float[]
+#    hadrons_mass     ->  float[]
+#    hadrons_pdgId    ->  int32_t[]
+#    hadrons_vx       ->  float[]
+#    hadrons_vy       ->  float[]
+#    hadrons_vz       ->  float[]
+#    hadrons_label    ->  int32_t[]
+#    eventNumber      ->  uint64_t
+#    trueNumPU        ->  float
+#    actualNumPU      ->  float
+
+MAX_PARTICLES_DICT = defaultdict(lambda: 400)
+MAX_PARTICLES_DICT.update({"hadrons": 50})
 
 INT_VARIABLES = {"pdgId"}
-SHORT_VARIABLES = {"class", "label"}
+SHORT_VARIABLES = {"class", "label", "charge"}
 
 
 def get_parser():
@@ -57,7 +85,6 @@ def get_parser():
         "--max_particles",
         type=int,
         required=False,
-        default=MAX_PARTICLES,
         help="Enter the maximum number of particles per event.",
     )
 
@@ -79,6 +106,21 @@ def get_parser():
         help="Number of files to load from directory (default: all files).",
     )
 
+    parser.add_argument(
+        "--shuffle",
+        action="store_true",
+        help="Whether to shuffle the events before writing to HDF5 (default: False).",
+    )
+
+    parser.add_argument(
+        "--cut-events",
+        action="store_true",
+        help=(
+            "Whether to cut events that exceed max_particles (default: False). "
+            "If enabled, only events with npart_orig < max_particles for all constituents will be kept."
+        ),
+    )
+
     return parser.parse_args()
 
 
@@ -90,19 +132,41 @@ class TreeMap:
     constituents: dict[str, list[str]]  # e.g., {'tracks': [...], 'cells': [...]}
 
     @classmethod
-    def create(cls, tree_name: str, tree_keys: list[str]) -> "TreeMap":
+    def create(cls, tree_name: str, tree) -> "TreeMap":
+        """Create TreeMap by analyzing branch dtypes.
+
+        Scalar branches -> global event variables
+        Array branches -> constituent variables (grouped by prefix)
+        """
         constituents = {}
         global_vars = []
-        for key in tree_keys:
-            if "event" in key.lower():
+
+        for key in tree.keys():
+            branch = tree[key]
+            # Check if branch is an array type (jagged or variable-length)
+            is_array = hasattr(branch.interpretation, "inner") or str(
+                branch.typename
+            ).endswith("[]")
+
+            if is_array:
+                # Array branch: constituent variable
+                # Skip count variables (e.g., 'npflow', 'ntruth')
+                if key.startswith("n") and len(key) > 1 and "_" not in key:
+                    continue
+
+                # Extract constituent name and variable name
+                if "_" in key:
+                    constituent_name, var_name = key.split("_", 1)
+                    if constituent_name not in constituents:
+                        constituents[constituent_name] = []
+                    constituents[constituent_name].append(var_name)
+            else:
+                # Scalar branch: global event variable
+                # Skip count variables
+                if key.startswith("n") and len(key) > 1 and "_" not in key:
+                    continue
                 global_vars.append(key)
-                continue
-            if key in {"npflow", "ntruth"}:
-                continue
-            constituent_name, var_name = key.split("_", 1)
-            if constituent_name not in constituents:
-                constituents[constituent_name] = []
-            constituents[constituent_name].append(var_name)
+
         return cls(
             tree_name=tree_name, global_vars=global_vars, constituents=constituents
         )
@@ -150,12 +214,20 @@ class PrepareSamples:
             self.output = Path(args.output)
 
         self.n_events = args.nevents
-        self.max_particles = args.max_particles
+        self.max_particles_dict = (
+            args.max_particles if args.max_particles is not None else MAX_PARTICLES_DICT
+        )
         self.batch_size = args.batch_size
+        self.cut_events = args.cut_events
+        self.shuffle = args.shuffle
 
         self.data_map, total_events = self.get_metadata(self.input_files)
         if self.n_events is None or self.n_events > total_events:
             self.n_events = total_events
+
+        self.removed_events = 0
+
+        self.rng = np.random.default_rng(seed=42)  # for reproducibility
 
     def _get_input_files(
         self, input_path: Path, num_files: int | None = None
@@ -212,8 +284,7 @@ class PrepareSamples:
         with uproot.open(filenames[0]) as rootfile:  # type: ignore
             tree = rootfile.keys()[0]  # get first tree
             tree_obj = rootfile[tree]
-            tree_keys = tree_obj.keys()
-            tree_map = TreeMap.create(tree, tree_keys)
+            tree_map = TreeMap.create(tree, tree_obj)
 
         # Count total events across all files
         total_events = 0
@@ -253,7 +324,10 @@ class PrepareSamples:
         # For multiple files, load all events from all files
         if len(filenames) > 1:
             print(f"Loading all events from {len(filenames)} files...")
-            for file_idx, filename in enumerate(tqdm(filenames, desc="Loading files")):
+            pbar = tqdm(filenames)
+            for file_idx, filename in enumerate(pbar):
+                filename: Path
+                pbar.set_description(f"File: {filename.name.strip('_poet.root')}")
                 with uproot.open(filename) as rootfile:  # type: ignore
                     tree = rootfile[tree_name]
                     arrays = tree.arrays(library="np")
@@ -321,6 +395,7 @@ class PrepareSamples:
     def _convert_constituents(self, arrays, max_size, start_index=0, end_index=None):
         dtypes = []
         output = []
+        original_length = []
         # sort by pt if available, otherwise by energy
         if "pt" in arrays:
             sort_idxs = [
@@ -340,30 +415,21 @@ class PrepareSamples:
             # We pad with NaNs to indicate invalid entries
             # shape: (n_events, max_size)
             # Also we sort the entries by pt/energy
-            output.append(
-                np.array(
-                    [
-                        np.pad(
-                            arr[i][sort_idxs[i - start_index]][:max_size].astype(
-                                np.float32
-                            ),
-                            (0, max_size - len(arr[i][:max_size])),
-                            "constant",
-                            constant_values=0
-                            if key in INT_VARIABLES | SHORT_VARIABLES
-                            else np.nan,
-                        )
-                        if arr[i].size > 0
-                        else [
-                            0 if key in INT_VARIABLES | SHORT_VARIABLES else np.nan
-                            for _ in range(max_size)
-                        ]
-                        for i in range(
-                            start_index, end_index if end_index else arr.shape[0]
-                        )
-                    ]
-                )
-            )
+            arr_subset = arr[start_index:end_index] if end_index else arr[start_index:]
+            n_events = len(arr_subset)
+
+            # Pre-allocate output array
+            pad_value = 0 if key in INT_VARIABLES | SHORT_VARIABLES else np.nan
+            padded = np.full((n_events, max_size), pad_value, dtype=np.float32)
+
+            # Fill with sorted data
+            for i, (event_arr, sort_idx) in enumerate(zip(arr_subset, sort_idxs)):
+                if key == "pt":
+                    original_length.append(len(event_arr))
+                if event_arr.size > 0:
+                    sorted_arr = event_arr[sort_idx][:max_size]
+                    padded[i, : len(sorted_arr)] = sorted_arr.astype(np.float32)
+            output.append(padded)
             dtypes.append(
                 (
                     key,
@@ -377,13 +443,18 @@ class PrepareSamples:
         dtypes.append(("valid", "bool"))
         return unstructured_to_structured(
             np.stack(output, axis=-1), dtype=np.dtype(dtypes)
-        )
+        ), np.array(original_length)
 
     def _compute_event_features(self, arrays: np.ndarray) -> dict[str, np.ndarray]:
         data_dict: dict[str, np.ndarray] = {}
-        data_dict["ht"] = np.nansum(arrays["pt"], axis=1)
-        data_dict["met_x"] = np.nansum(arrays["pt"] * np.cos(arrays["phi"]), axis=1)
-        data_dict["met_y"] = np.nansum(arrays["pt"] * np.sin(arrays["phi"]), axis=1)
+        # Only compute features if required fields exist
+        if "pt" in arrays.dtype.names:
+            data_dict["ht"] = np.nansum(arrays["pt"], axis=1)
+        if "pt" in arrays.dtype.names and "phi" in arrays.dtype.names:
+            data_dict["met_x"] = np.nansum(arrays["pt"] * np.cos(arrays["phi"]), axis=1)
+            data_dict["met_y"] = np.nansum(arrays["pt"] * np.sin(arrays["phi"]), axis=1)
+        if "valid" in arrays.dtype.names:
+            data_dict["npart"] = np.sum(arrays["valid"], axis=1).astype(np.int32)
         return data_dict
 
     def run(self):
@@ -406,11 +477,16 @@ class PrepareSamples:
             }
             # convert constituents
             for constituent_name in self.data_map.constituents:
-                h5_tree_data[constituent_name] = self._convert_constituents(
-                    tree_data[constituent_name],
-                    self.max_particles,
-                    start_index=start,
-                    end_index=end,
+                h5_tree_data[constituent_name], original_length = (
+                    self._convert_constituents(
+                        tree_data[constituent_name],
+                        self.max_particles_dict[constituent_name],
+                        start_index=start,
+                        end_index=end,
+                    )
+                )
+                event_data_dict[f"{constituent_name}_npart_orig"] = (
+                    original_length.astype(np.int32)
                 )
                 for key, value in self._compute_event_features(
                     h5_tree_data[constituent_name]
@@ -419,6 +495,31 @@ class PrepareSamples:
             # convert global event variables
             h5_tree_data["events"] = self._convert_events(event_data_dict)
             pbar.update(end - start)
+
+            if self.cut_events:
+                valid_mask = np.ones(end - start, dtype=bool)
+                for consituent_name in self.data_map.constituents:
+                    valid_mask &= (
+                        h5_tree_data["events"][f"{consituent_name}_npart_orig"]
+                        < self.max_particles_dict[consituent_name]
+                    )
+                    if consituent_name in {"pflow", "truth"}:
+                        valid_mask &= (
+                            h5_tree_data["events"][f"{consituent_name}_npart_orig"] > 0
+                        )
+                h5_tree_data["events"] = h5_tree_data["events"][valid_mask]
+                for constituent_name in self.data_map.constituents:
+                    h5_tree_data[constituent_name] = h5_tree_data[constituent_name][
+                        valid_mask
+                    ]
+                self.removed_events += np.sum(~valid_mask)
+
+            if self.shuffle:
+                idx = np.arange(h5_tree_data["events"].shape[0])
+                self.rng.shuffle(idx)
+                for key in h5_tree_data:
+                    h5_tree_data[key] = h5_tree_data[key][idx]
+
             if create_file:
                 create_file = False
                 # write to file by creating dataset
@@ -426,13 +527,19 @@ class PrepareSamples:
                 displayed_writing_output = True
                 with h5py.File(self.output, "w") as out_file:
                     for key, value in h5_tree_data.items():
+                        if key == "events":
+                            chunk_shape = (1024,)
+                            max_shape = (None,)
+                        else:
+                            width = self.max_particles_dict[key]
+                            # For constituents, we set chunk shape to (64, width) to optimize for reading batches of events
+                            chunk_shape = (64, width)
+                            max_shape = (None, width)
                         out_file.create_dataset(
                             key,
                             data=value,
-                            maxshape=(None,)
-                            if key == "events"
-                            else (None, self.max_particles),
-                            chunks=True,
+                            chunks=chunk_shape,
+                            maxshape=max_shape,
                             compression=hdf5plugin.LZ4(),
                         )
 
@@ -447,6 +554,14 @@ class PrepareSamples:
                         dataset[-value.shape[0] :] = value
                 displayed_writing_output = False
         pbar.close()
+
+        print(
+            f"Finished writing {self.n_events - self.removed_events} events to {self.output}"
+        )
+        if self.cut_events:
+            print(
+                f"Removed {self.removed_events} events that exceeded max_particles limit."
+            )
 
     def validate(self, batch_size: int = 100) -> bool:
         """Validate the output file by comparing random samples from HDF5 and ROOT files.
@@ -560,5 +675,9 @@ if __name__ == "__main__":
     preparation_tool = PrepareSamples(args=args)
     preparation_tool.run()
 
-    # for _ in range(3):
-    #     preparation_tool.validate(batch_size=1000)
+    if (
+        len(preparation_tool.input_files) == 1
+        and not preparation_tool.shuffle
+        and not preparation_tool.cut_events
+    ):
+        preparation_tool.validate(batch_size=1000)

@@ -4,7 +4,7 @@ from lightning import Callback, Trainer
 import uproot
 import awkward as ak
 
-from parnassus_core.flow.utils.scaling import Unscaler
+from parnassus_core.data.utils.scaling import Unscaler
 
 
 class PredictionWriter(Callback):

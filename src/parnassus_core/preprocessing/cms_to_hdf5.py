@@ -80,6 +80,11 @@ def get_parser():
         default=10_000,
         help="Enter the batch size for processing events. Used to write data in chunks.",
     )
+    parser.add_argument(
+        "--shuffle",
+        action="store_true",
+        help="Whether to shuffle the events before writing to HDF5. Shuffling is done for each batch.",
+    )
     return parser.parse_args()
 
 
@@ -111,6 +116,9 @@ class CMSPreprocessor:
         self.eta_cut = args.eta_cut
         self.max_particles = args.max_particles
         self.batch_size = args.batch_size
+        self.shuffle = args.shuffle
+
+        self.rng = np.random.default_rng(seed=42)
 
         # Data storage
         self.data = {
@@ -128,6 +136,14 @@ class CMSPreprocessor:
                 for name, varlist in pbar_trees:
                     pbar_trees.set_description(f"Loading tree {name}")
                     tree = f[name + "/Events"]
+                    # Select entry_stop based on available events in the tree
+                    if self.n_events == -1:
+                        entry_stop = tree.num_entries
+                    else:
+                        entry_stop = min(
+                            self.entry_start + self.n_events, tree.num_entries
+                        )
+
                     # Only load variables that exist in the tree
                     available_keys = tree.keys()
                     array_names = [
@@ -138,7 +154,7 @@ class CMSPreprocessor:
                     arrays = tree.arrays(
                         array_names,
                         library="np",
-                        entry_stop=self.n_events + self.entry_start,
+                        entry_stop=entry_stop,
                         entry_start=self.entry_start,
                     )
                     for var in varlist:
@@ -403,6 +419,12 @@ class CMSPreprocessor:
             h5_tree_data["events"] = self._convert_events(event_data_dict)
 
             pbar.update(end - start)
+
+            if self.shuffle:
+                idxs = np.arange(len(h5_tree_data["events"]))
+                self.rng.shuffle(idxs)
+                for key in h5_tree_data.keys():
+                    h5_tree_data[key] = h5_tree_data[key][idxs]
 
             if create_file:
                 create_file = False
