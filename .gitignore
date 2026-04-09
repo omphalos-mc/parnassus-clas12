@@ -134,6 +134,10 @@ evals
 *.onnx
 *.data
 
+# PyTorch checkpoints
+*.ckpt
+*.pt
+
 # NFS
 *.nfs*
 

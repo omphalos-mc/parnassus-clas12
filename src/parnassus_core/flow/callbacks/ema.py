@@ -15,7 +15,7 @@ import contextlib
 import copy
 import os
 import threading
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Optional
 
 import lightning.pytorch as pl
 import torch
@@ -39,6 +39,7 @@ class EMA(Callback):
         validate_original_weights: Validate the original weights, as apposed to the EMA weights.
         every_n_steps: Apply EMA every N steps.
         cpu_offload: Offload weights to CPU.
+        ema_start_step: Step at which to start EMA updates. Before this step, no EMA is computed.
     """
 
     def __init__(
@@ -47,6 +48,7 @@ class EMA(Callback):
         validate_original_weights: bool = False,
         every_n_steps: int = 1,
         cpu_offload: bool = False,
+        ema_start_step: int = 0,
     ):
         if not (0 <= decay <= 1):
             raise MisconfigurationException("EMA decay value must be between 0 and 1")
@@ -54,21 +56,24 @@ class EMA(Callback):
         self.validate_original_weights = validate_original_weights
         self.every_n_steps = every_n_steps
         self.cpu_offload = cpu_offload
+        self.ema_start_step = ema_start_step
 
     def on_fit_start(
         self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
     ) -> None:
         device = pl_module.device if not self.cpu_offload else torch.device("cpu")
         trainer.optimizers = [
-            EMAOptimizer(
+            optim
+            if isinstance(optim, EMAOptimizer)
+            else EMAOptimizer(
                 optim,
                 device=device,
                 decay=self.decay,
                 every_n_steps=self.every_n_steps,
                 current_step=trainer.global_step,
+                ema_start_step=self.ema_start_step,
             )
             for optim in trainer.optimizers
-            if not isinstance(optim, EMAOptimizer)
         ]
 
     def on_validation_start(
@@ -138,16 +143,9 @@ class EMA(Callback):
     ) -> None:
         checkpoint_callback = trainer.checkpoint_callback
 
-        # use the connector as NeMo calls the connector directly in the exp_manager when restoring.
-        connector = trainer._checkpoint_connector  # noqa: F841
-        # Replace connector._ckpt_path with below to avoid calling into lightning's protected API
         ckpt_path = trainer.ckpt_path
 
-        if (
-            ckpt_path
-            and checkpoint_callback is not None
-            and "NeMo" in type(checkpoint_callback).__name__
-        ):
+        if ckpt_path and checkpoint_callback is not None:
             ext = checkpoint_callback.FILE_EXTENSION
             if ckpt_path.endswith(f"-EMA{ext}"):
                 rank_zero_info(
@@ -158,7 +156,9 @@ class EMA(Callback):
                 return
             ema_path = ckpt_path.replace(ext, f"-EMA{ext}")
             if os.path.exists(ema_path):
-                ema_state_dict = torch.load(ema_path, map_location=torch.device("cpu"))
+                ema_state_dict = torch.load(
+                    ema_path, map_location=torch.device("cpu"), weights_only=False
+                )
 
                 checkpoint["optimizer_states"] = ema_state_dict["optimizer_states"]
                 del ema_state_dict
@@ -237,12 +237,14 @@ class EMAOptimizer(torch.optim.Optimizer):
         decay: float = 0.9999,
         every_n_steps: int = 1,
         current_step: int = 0,
+        ema_start_step: int = 0,
     ):
         self.optimizer = optimizer
         self.decay = decay
         self.device = device
         self.current_step = current_step
         self.every_n_steps = every_n_steps
+        self.ema_start_step = ema_start_step
         self.save_original_optimizer_state = False
 
         self.first_iteration = True
@@ -253,8 +255,8 @@ class EMAOptimizer(torch.optim.Optimizer):
         self.ema_params = ()
         self.in_saving_ema_model_context = False
 
-    def all_parameters(self) -> Iterable[torch.Tensor]:
-        return (param for group in self.param_groups for param in group["params"])
+    def all_parameters(self) -> list[torch.Tensor]:
+        return [param for group in self.param_groups for param in group["params"]]
 
     def step(self, closure=None, grad_scaler=None, **kwargs):
         self.join()
@@ -265,7 +267,8 @@ class EMAOptimizer(torch.optim.Optimizer):
 
             self.first_iteration = False
 
-        if self.rebuild_ema_params:
+        # Only initialize EMA params after reaching ema_start_step
+        if self.current_step >= self.ema_start_step and self.rebuild_ema_params:
             opt_params = list(self.all_parameters())
 
             self.ema_params += tuple(
@@ -282,7 +285,12 @@ class EMAOptimizer(torch.optim.Optimizer):
         else:
             loss = self.optimizer.step(closure)
 
-        if self._should_update_at_step():
+        # Only update EMA after ema_start_step and if params are initialized
+        if (
+            self.current_step >= self.ema_start_step
+            and self._should_update_at_step()
+            and not self.rebuild_ema_params
+        ):
             self.update()
         self.current_step += 1
         return loss
@@ -376,6 +384,7 @@ class EMAOptimizer(torch.optim.Optimizer):
             "current_step": self.current_step,
             "decay": self.decay,
             "every_n_steps": self.every_n_steps,
+            "ema_start_step": self.ema_start_step,
         }
         return state_dict
 
@@ -389,6 +398,9 @@ class EMAOptimizer(torch.optim.Optimizer):
         self.current_step = state_dict["current_step"]
         self.decay = state_dict["decay"]
         self.every_n_steps = state_dict["every_n_steps"]
+        self.ema_start_step = state_dict.get(
+            "ema_start_step", 0
+        )  # backwards compatibility
         self.rebuild_ema_params = False
 
     def add_param_group(self, param_group):
@@ -402,10 +414,6 @@ class EMAModelCheckpoint(Checkpoint):
 
     Adapted from: https://github.com/NVIDIA/NeMo/blob/be0804f61e82dd0f63da7f9fe8a4d8388e330b18/nemo/utils/exp_manager.py#L744
     """
-
-    def __init__(self, **kwargs):
-        # call the parent class constructor with the provided kwargs
-        super().__init__(**kwargs)
 
     def _get_ema_callback(self, trainer: "pl.Trainer") -> Optional[EMA]:
         ema_callback = None

@@ -60,4 +60,4 @@ class EventNetwork(nn.Module):
         fs_embd = (1 + scale_mlp) * fs_embd + shift_mlp
         fs_embd = self.encoder(fs_embd)
         fs_out = self.fs_out_net(fs_embd, ctxt=global_embd)
-        return fs_out
+        return fs_out, None

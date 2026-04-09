@@ -5,7 +5,7 @@ import tempfile
 import os
 import yaml
 
-from parnassus_core.flow.utils.scaling import (
+from parnassus_core.data.utils.scaling import (
     VarTransform,
     FeatureScaler,
     Unscaler,
@@ -242,30 +242,6 @@ class TestFeatureScaler:
         unknown_transform = scaler["unknown_feature"]
         assert isinstance(unknown_transform, VarTransform)
 
-    def test_transform(self, temp_yaml_file, sample_tensor_data):
-        """Test transform method."""
-        scaler = FeatureScaler(temp_yaml_file)
-
-        # Create a copy to avoid modifying the original
-        input_data = {k: v.clone() for k, v in sample_tensor_data.items()}
-        result = scaler.transform(input_data)
-
-        # Check that known features are transformed
-        assert not torch.equal(result["ptrel"], sample_tensor_data["ptrel"])
-        assert not torch.equal(result["eta"], sample_tensor_data["eta"])
-
-        recovered = scaler.inverse_transform(result)
-
-        for key in input_data:
-            torch.testing.assert_close(
-                recovered[key], sample_tensor_data[key], atol=1e-5, rtol=1e-5
-            )
-
-        # Check that unknown features remain unchanged
-        torch.testing.assert_close(
-            result["unknown_var"], sample_tensor_data["unknown_var"]
-        )
-
     def test_empty_config(self):
         """Test with empty configuration file."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -393,7 +369,7 @@ class TestUnscaler:
             "ctxt_global_data": ctxt_global_data,
         }
 
-        result = unscaler.unscale_variables(fs_data, ctxt_dict, pf_data=pf_data)
+        result = unscaler.unscale_variables(fs_data, ctxt_dict, target_data=pf_data)
 
         # Check that result contains expected keys
         assert "fs_pt" in result
@@ -411,7 +387,7 @@ class TestUnscaler:
             -1, 1
         )
         np.testing.assert_allclose(result["fs_pt"], expected_fs_pt, rtol=1e-5)
-        if use_pf_data:
+        if use_pf_data and pf_data is not None:
             expected_pf_pt = np.expm1(pf_data.numpy())[..., 0] * expected_pf_ht.reshape(
                 -1, 1
             )

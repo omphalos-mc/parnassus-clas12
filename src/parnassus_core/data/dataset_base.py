@@ -68,6 +68,7 @@ class PhysicsDatasetBase(Dataset, ABC):
     zero_neutral_vtx : bool
         Zero vertex-related variables for neutral particles.
     fs_mask_type : ``"all"`` | ``"charged"`` | ``"neutral"``
+    ctxt_mask_type : ``"all"`` | ``"charged"`` | ``"neutral"``
     mode : ``"train"`` | ``"test"`` | ``"eval"``
     recalculate_ip : bool
         Recompute impact parameters from vertex positions.
@@ -101,6 +102,7 @@ class PhysicsDatasetBase(Dataset, ABC):
         sin_cos: bool,
         zero_neutral_vtx: bool,
         fs_mask_type: Literal["all", "charged", "neutral"] = "all",
+        ctxt_mask_type: Literal["all", "charged", "neutral"] = "all",
         mode: Literal["train", "test", "eval"] = "train",
         recalculate_ip: bool = False,
     ):
@@ -113,6 +115,7 @@ class PhysicsDatasetBase(Dataset, ABC):
         self.sin_cos = sin_cos
         self.zero_neutral_vtx = zero_neutral_vtx
         self.fs_mask_type = fs_mask_type
+        self.ctxt_mask_type = ctxt_mask_type
         self.mode = mode
         self.recalculate_ip = recalculate_ip
 

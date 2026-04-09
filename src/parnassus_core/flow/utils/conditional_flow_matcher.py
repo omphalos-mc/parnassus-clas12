@@ -514,6 +514,10 @@ class FlowMatcher:
         flow_type: str,
         sigma: float,
         time_distribution: str = "uniform",
+        power_alpha: float = 3,
+        lognorm_mu: float = 0,
+        lognorm_sigma: float = 1,
+        mode_s: float = -0.54,
     ):
         assert flow_type in [
             "fm",
@@ -532,6 +536,10 @@ class FlowMatcher:
         self.flow_type = flow_type
         self.sigma = sigma
         self.time_distribution = time_distribution
+        self.lognorm_mu = lognorm_mu
+        self.lognorm_sigma = lognorm_sigma
+        self.mode_s = mode_s
+        self.power_alpha = power_alpha
 
         match self.flow_type:
             case "icfm":
@@ -544,7 +552,21 @@ class FlowMatcher:
                 self.FM = VariancePreservingConditionalFlowMatcher(sigma=self.sigma)
 
         print("Using sigma:", self.sigma)
-        print("Using time distribution:", self.time_distribution)
+
+        match self.time_distribution:
+            case "lognorm":
+                print(
+                    "Using lognormal distribution with mu:",
+                    self.lognorm_mu,
+                    "and sigma:",
+                    self.lognorm_sigma,
+                )
+            case "mode":
+                print("Using mode distribution with s:", self.mode_s)
+            case "pow":
+                print("Using power distribution with alpha:", self.power_alpha)
+            case "uniform":
+                print("Using uniform distribution")
 
     def sample_from_logit_normal(self, mu, sigma, size):
         samples = norm.rvs(loc=mu, scale=sigma, size=size)
@@ -560,11 +582,13 @@ class FlowMatcher:
             case "uniform":
                 time = np.random.rand(size)
             case "pow":
-                time = np.random.power(3, size=size)
+                time = np.random.power(self.power_alpha, size=size)
             case "lognorm":
-                time = self.sample_from_logit_normal(0, 1, size=size)
+                time = self.sample_from_logit_normal(
+                    self.lognorm_mu, self.lognorm_sigma, size=size
+                )
             case "mode":
-                time = self.sample_from_mode(-0.54, size=size)
+                time = self.sample_from_mode(self.mode_s, size=size)
         return torch.FloatTensor(time).to(device)
 
     def sample(self, x: torch.Tensor):

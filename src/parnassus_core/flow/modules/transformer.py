@@ -3,6 +3,8 @@ from typing import Literal
 from torch import Tensor
 import torch.nn as nn
 
+from torch.nn.attention.flex_attention import BlockMask
+
 from parnassus_core.flow.modules.attention import Attention
 from parnassus_core.flow.modules.norms import RMSNorm, LayerNorm
 
@@ -100,7 +102,7 @@ class DiTLayer(nn.Module):
         self,
         hidden_dim: int,
         num_heads: int,
-        mha_config: dict = None,
+        mha_config: dict | None = None,
         mlp_ratio: float = 4.0,
         ctxt_ratio: float = 3.0,
         simplify: bool = False,
@@ -143,7 +145,13 @@ class DiTLayer(nn.Module):
         self.attn_type = attn_type
         return self.attn_type
 
-    def forward(self, seq_q, seq_k, ctxt, mask_k=None):
+    def forward(
+        self,
+        seq_q: Tensor,
+        seq_k: Tensor,
+        ctxt: Tensor,
+        mask_k: Tensor | BlockMask | None = None,
+    ):
         # Common stuff
         mod_mha, mod_mlp = self.adaLN_modulation(ctxt)
         seq_q_mod = mod_mha.modulate(self.norm1(seq_q))
@@ -171,12 +179,20 @@ class DiTLayer(nn.Module):
 
 
 class SADiTLayer(DiTLayer):
-    def forward(self, seq, ctxt, mask=None):
+    def forward(
+        self, seq: Tensor, ctxt: Tensor, mask: Tensor | BlockMask | None = None
+    ):
         return super().forward(seq, seq, ctxt, mask)
 
 
 class CADiTLayer(DiTLayer):
-    def forward(self, seq_q, seq_k, ctxt, mask_k=None):
+    def forward(
+        self,
+        seq_q: Tensor,
+        seq_k: Tensor,
+        ctxt: Tensor,
+        mask_k: Tensor | BlockMask | None = None,
+    ):
         return super().forward(seq_q, seq_k, ctxt, mask_k)
 
 
@@ -234,7 +250,35 @@ class DiTBlock(nn.Module):
             self.ca_layer_b.set_backend(attn_type)
         return self.attn_type
 
-    def forward(self, seq_a, seq_b, ctxt, mask_a=None, mask_b=None):
+    def forward(
+        self,
+        seq_a: Tensor,
+        seq_b: Tensor,
+        ctxt: Tensor,
+        mask_a: Tensor | BlockMask | None = None,
+        mask_b: Tensor | BlockMask | None = None,
+    ) -> tuple[Tensor, Tensor]:
+        """
+        Forward pass of the DiT block. It assumes that the seq_a is updated first and then seq_b is updated, if bidirectional is True.
+
+        Parameters
+        ----------
+        seq_a : torch.Tensor
+            The first input sequence.
+        seq_b : torch.Tensor
+            The second input sequence.
+        ctxt : torch.Tensor
+            The context tensor used for modulation.
+        mask_a : torch.Tensor | BlockMask | None, optional
+            The attention mask for seq_a.
+        mask_b : torch.Tensor | BlockMask | None, optional
+            The attention mask for seq_b.
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor]
+            The updated seq_a and seq_b tensors.
+
+        """
         if self.do_selfattn:
             seq_a = self.sa_layer_a(seq=seq_a, ctxt=ctxt, mask=mask_a)
         seq_a = self.ca_layer_a(seq_q=seq_a, seq_k=seq_b, ctxt=ctxt, mask_k=mask_b)
@@ -255,6 +299,38 @@ class DiTBlock(nn.Module):
 
 
 class DiTEncoder(nn.Module):
+    """
+    DiT Encoder consisting of multiple DiT blocks.
+
+    Parameters
+    ----------
+    hidden_dim : int
+        Dimension of the hidden layers.
+    num_heads : int
+        Number of attention heads.
+    num_layers : int
+        Number of DiT blocks.
+    mha_config : dict, optional
+        Configuration for the multi-head attention.
+    mlp_ratio : float, optional
+        Ratio of the MLP hidden dimension to the hidden dimension.
+    ctxt_ratio : float, optional
+        Ratio of the context dimension to the hidden dimension.
+    attn_type : str, optional
+        Type of attention mechanism to use ('torch', 'flex', etc.).
+    do_selfattn : bool, optional
+        Whether to include self-attention layers.
+    bidirectional : bool, optional
+        Whether the cross-attention is bidirectional.
+    simplify : bool, optional
+        Whether to use the simplified architecture.
+    norm : Literal['rms', 'layer'], optional
+        Type of normalization to use ('rms' or 'layer').
+    itermediate_idx_to_return : int, optional
+        Index of the intermediate layer to return outputs from. If -1, no intermediate output is returned.
+
+    """
+
     def __init__(
         self,
         hidden_dim: int,
@@ -268,6 +344,7 @@ class DiTEncoder(nn.Module):
         bidirectional: bool = True,
         simplify: bool = False,
         norm: Literal["rms", "layer"] = "rms",
+        intermediate_idx_to_return: int = -1,
     ):
         super().__init__()
         self.attn_type = attn_type
@@ -277,6 +354,11 @@ class DiTEncoder(nn.Module):
         self.do_selfattn = do_selfattn
         self.bidirectional = bidirectional
         self.simplify = simplify
+
+        # For returning intermediate layer outputs
+        self.return_intermediate = intermediate_idx_to_return >= 0
+        self.intermediate_idx = intermediate_idx_to_return
+
         if mha_config is None:
             mha_config = {}
         mha_config["attn_type"] = attn_type
@@ -305,14 +387,24 @@ class DiTEncoder(nn.Module):
             self.attn_type = layer.set_backend(self.attn_type)
         return self.attn_type
 
-    def forward(self, seq_a, seq_b, ctxt, mask_a=None, mask_b=None):
+    def forward(
+        self,
+        seq_a: Tensor,
+        seq_b: Tensor,
+        ctxt: Tensor,
+        mask_a: Tensor | BlockMask | None = None,
+        mask_b: Tensor | BlockMask | None = None,
+    ):
         if self.attn_type == "flex":
             assert seq_a.size(1) == seq_b.size(1), (
                 "For flex attention, sequences must be of equal length."
             )
-        for layer in self.layers:
+        intermediate_output = None
+        for i, layer in enumerate(self.layers):
             seq_a, seq_b = layer(seq_a, seq_b, ctxt, mask_a, mask_b)
-        return seq_a, seq_b
+            if self.return_intermediate and i == self.intermediate_idx:
+                intermediate_output = seq_a
+        return seq_a, seq_b, intermediate_output
 
     def reset_parameters(self):
         for layer in self.layers:

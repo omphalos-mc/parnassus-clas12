@@ -21,55 +21,62 @@ class PredictionWriter(Callback):
         self.pl_module = pl_module
 
         self.eval_output_name = self.trainer.datamodule.eval_output_name
+        if self.eval_output_name is None:
+            self.eval_output_name = "output"
         self.eval_path = Path(self.trainer.log_dir)
 
     def on_test_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
     ):
-        pf_data, ctxt_dict = batch
+        target_data, ctxt_dict = batch
         return_dict = {}
         with torch.no_grad():
             fs_data = pl_module.sample(
-                pf_data.shape,
+                target_data.shape,
                 ctxt_dict=ctxt_dict,
             )
         for key, val in ctxt_dict.items():
             return_dict[key] = val.cpu()
         return_dict["fs_data"] = fs_data.cpu()
-        return_dict["pf_data"] = pf_data.cpu()
+        return_dict["target_data"] = target_data.cpu()
         self.test_outputs.append(return_dict)
 
     def on_test_epoch_end(self, trainer, pl_module):
         ctxt_dict = {}
         fs_data = []
-        pf_data = []
+        target_data = []
         for el in self.test_outputs:
             for key, val in el.items():
                 if key == "fs_data":
                     fs_data.append(val)
-                elif key == "pf_data":
-                    pf_data.append(val)
+                elif key == "target_data":
+                    target_data.append(val)
                 else:
                     if key not in ctxt_dict:
                         ctxt_dict[key] = []
                     ctxt_dict[key].append(val)
         fs_data = torch.cat(fs_data, dim=0)
-        pf_data = torch.cat(pf_data, dim=0)
+        target_data = torch.cat(target_data, dim=0)
         for key, val in ctxt_dict.items():
             ctxt_dict[key] = torch.cat(val, dim=0)
-        out_dict = self.unscaler.unscale_variables(fs_data, ctxt_dict, pf_data=pf_data)
-        out_dict["tr_mask"] = ctxt_dict["ctxt_mask"] > 0
-        out_dict["pf_mask"] = ctxt_dict["fs_mask"] > 0
+        out_dict = self.unscaler.unscale_variables(
+            fs_data, ctxt_dict, target_data=target_data
+        )
+        out_dict["truth_mask"] = ctxt_dict["ctxt_mask"] > 0
+        if "pf_ctxt_data" in ctxt_dict:
+            out_dict["pflow_mask"] = ctxt_dict["pf_ctxt_mask"] > 0
+        else:
+            out_dict["pflow_mask"] = ctxt_dict["fs_mask"] > 0
         n_events = len(out_dict["eventNumber"])
         eval_subpath = (
-            self.eval_path / f"{self.eval_output_name}_{n_events // 1e3}k.root"
+            self.eval_path / f"{self.eval_output_name}_{int(n_events // 1e3)}k.root"
         )
         if eval_subpath.exists():
             print("Warning: Overwriting existing file:", eval_subpath)
         mapping = {
             "fs_": "fastsim",
-            "pf_": "pflow",
-            "tr_": "truth",
+            "pflow_": "pflow",
+            "truth_": "truth",
         }
         uproot_dict = {
             map_value: {

@@ -109,7 +109,7 @@ class Sampler(ABC):
             deriv: Model output at the current timestep (dx/dt)
 
         """
-        deriv = model.forward(
+        deriv, _ = model.forward(
             fastsim,
             timestep=timestep.expand(fastsim.shape[0]),
             ctxt_dict=ctxt_dict,
@@ -238,7 +238,7 @@ class Sampler(ABC):
         save_seq=False,
         to_cpu=True,
         **kwargs,
-    ):
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         pass
 
 
@@ -276,6 +276,114 @@ class EulerSampler(Sampler):
             )
             if save_seq:
                 seq.append(fastsim.cpu())
+        if save_seq:
+            seq = torch.stack(seq)
+            return fastsim.cpu(), seq
+        if to_cpu:
+            return fastsim.cpu()
+        return fastsim
+
+
+class SDESampler(Sampler):
+    def __init__(
+        self,
+        n_steps,
+        use_edm_schedule=False,
+        heavy_tail=False,
+        zero_init_padded=True,
+        edm_config: dict | None = None,
+        random_seed=None,
+        reverse_time=False,
+        eta: float = 1.0,
+        last_step_size: float = 1e-3,
+        diffusion_mode: str = "linear",
+    ):
+        super().__init__(
+            n_steps=n_steps,
+            use_edm_schedule=use_edm_schedule,
+            heavy_tail=heavy_tail,
+            zero_init_padded=zero_init_padded,
+            edm_config=edm_config,
+            random_seed=random_seed,
+            reverse_time=reverse_time,
+        )
+        assert reverse_time, "SDE sampler currently only supports reverse time (RCFM)"
+
+        self.eta = eta
+        self.last_step_size = last_step_size
+        t0, t1 = 1, last_step_size
+        self.t_steps = torch.linspace(t0, t1, n_steps)
+        self.t_steps = torch.cat([torch.ones_like(self.t_steps)[:1], self.t_steps])
+        print(
+            f"Using SDE sampler with eta={eta}, last_step_size={last_step_size}, diffusion_mode={diffusion_mode}"
+        )
+        print("Using t_steps:", self.t_steps)
+        self.diffusion_mode = diffusion_mode
+
+    def get_diffusion_coeff(self, t):
+        if self.diffusion_mode == "linear":
+            return t
+        elif self.diffusion_mode == "sdbm":
+            return 2 * (t + t**2 / (1 - t))
+        elif self.diffusion_mode == "increasing-decreasing":
+            return torch.sin(np.pi * t) ** 2
+        else:
+            raise ValueError(f"Invalid diffusion mode: {self.diffusion_mode}")
+
+    @torch.inference_mode()
+    def sample(
+        self,
+        model,
+        pflow_shape,
+        *,
+        ctxt_dict,
+        save_seq=False,
+        init_fastsim: Optional[torch.Tensor] = None,
+        to_cpu=True,
+        **kwargs,
+    ):
+        mask = ctxt_dict["fs_mask"]
+        dtype, device = ctxt_dict["ctxt_data"].dtype, ctxt_dict["ctxt_data"].device
+        if init_fastsim is None:
+            fastsim = self._init_fastsim(pflow_shape, mask, device)
+        else:
+            fastsim = init_fastsim
+        fastsim = fastsim.to(dtype)
+        t_steps = self.t_steps.to(device).to(dtype)
+
+        seq = [fastsim.cpu()]
+        for i, (t_cur, t_next) in tqdm(
+            enumerate(zip(t_steps[:-1], t_steps[1:])), total=self.n_steps
+        ):
+            dt = torch.abs(t_next - t_cur)
+            v_theta, _ = model.forward(
+                fastsim,
+                timestep=t_cur.expand(fastsim.shape[0]),
+                ctxt_dict=ctxt_dict,
+            )
+            eps_hat = fastsim + (1.0 - t_cur) * v_theta
+            score = -eps_hat / t_cur
+
+            g_t = self.get_diffusion_coeff(t_cur) * self.eta
+
+            drift = v_theta + 0.5 * (g_t**2) * score
+
+            noise = self.distribution.sample(fastsim.shape).to(
+                device=device, dtype=dtype
+            )
+            fastsim = fastsim - drift * dt + g_t * torch.sqrt(dt) * noise
+
+            if save_seq:
+                seq.append(fastsim.cpu())
+
+        t_final = torch.tensor(self.last_step_size, device=device, dtype=dtype)
+        v_theta, _ = model.forward(
+            fastsim,
+            timestep=t_final.expand(fastsim.shape[0]),
+            ctxt_dict=ctxt_dict,
+        )
+        fastsim = fastsim - v_theta * t_final
+
         if save_seq:
             seq = torch.stack(seq)
             return fastsim.cpu(), seq
@@ -433,7 +541,7 @@ class PNDMSampler(Sampler):
             enumerate(zip(t_steps[:-1], t_steps[1:])), total=self.n_steps
         ):
             if len(ets) > 2:
-                deriv_ = model.forward(
+                deriv_, _ = model.forward(
                     fastsim,
                     timestep=t_cur.expand(fastsim.shape[0]),
                     ctxt_dict=ctxt_dict,

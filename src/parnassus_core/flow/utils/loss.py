@@ -11,10 +11,20 @@ class MSELoss(nn.Module):
     Figure 7 - https://arxiv.org/abs/2410.10356
     """
 
-    def __init__(self, reduction: Literal["mean", "sum"] = "mean"):
+    def __init__(
+        self,
+        reduction: Literal["mean", "sum"] = "mean",
+        loss_weights: torch.Tensor | list[float] | None = None,
+    ):
         super().__init__()
         assert reduction in ["mean", "sum"], "reduction must be 'mean' or 'sum'"
         self.reduction = reduction
+        if isinstance(loss_weights, list):
+            loss_weights = torch.tensor(loss_weights)
+        self.loss_weights = nn.Buffer(
+            loss_weights if loss_weights is not None else torch.ones(1),
+            persistent=False,
+        )
 
     def forward(
         self, pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | None = None
@@ -22,7 +32,9 @@ class MSELoss(nn.Module):
         if mask is not None:
             pred = pred * mask.unsqueeze(-1)
             target = target * mask.unsqueeze(-1)
-        mse_loss = F.mse_loss(pred, target, reduction="sum")
+        mse_loss = (
+            self.loss_weights * F.mse_loss(pred, target, reduction="none")
+        ).sum()
         if self.reduction == "sum":
             return mse_loss
         elif self.reduction == "mean":
@@ -38,13 +50,22 @@ class MSEAndDirectionLoss(nn.Module):
     """
 
     def __init__(
-        self, cosine_sim_dim: int = 2, reduction: Literal["mean", "sum"] = "mean"
+        self,
+        cosine_sim_dim: int = 2,
+        reduction: Literal["mean", "sum"] = "mean",
+        loss_weights: torch.Tensor | list[float] | None = None,
     ):
         super().__init__()
         assert cosine_sim_dim > 0, "cannot be batch dimension"
         assert reduction in ["mean", "sum"], "reduction must be 'mean' or 'sum'"
         self.cosine_sim_dim = cosine_sim_dim
         self.reduction = reduction
+        if isinstance(loss_weights, list):
+            loss_weights = torch.tensor(loss_weights)
+        self.loss_weights = nn.Buffer(
+            loss_weights if loss_weights is not None else torch.ones(1),
+            persistent=False,
+        )
 
     def forward(
         self, pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor | None = None
@@ -63,7 +84,9 @@ class MSEAndDirectionLoss(nn.Module):
             target_masked = target
 
         # Compute losses
-        mse_loss = F.mse_loss(pred_masked, target_masked, reduction="sum")
+        mse_loss = (
+            self.loss_weights * F.mse_loss(pred_masked, target_masked, reduction="none")
+        ).sum()
         direction_loss = 1.0 - F.cosine_similarity(
             pred_masked, target_masked, dim=cosine_dim
         )

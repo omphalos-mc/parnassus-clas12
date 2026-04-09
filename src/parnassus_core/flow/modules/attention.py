@@ -206,7 +206,7 @@ class Attention(nn.Module):
 
     def _prepare_qkv(
         self, q: Tensor, kv: Tensor | None = None, initial_values: dict | None = None
-    ) -> tuple[Tensor, Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor | None]:
         # Mix for value residual
         mix = None
         if self.value_residual:

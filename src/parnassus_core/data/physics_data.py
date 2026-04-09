@@ -83,6 +83,7 @@ def build_ctxt_data(
     sin_cos: bool,
     feature_scaler: FeatureScaler,
     var_helper: VariableHelper,
+    ctxt_mask_type: Literal["all", "charged", "neutral"] = "all",
 ) -> dict[str, Tensor]:
     """Build context data from particle collections.
 
@@ -99,6 +100,8 @@ def build_ctxt_data(
         sin_cos: Apply sin/cos transform to phi variables.
         feature_scaler: :class:`FeatureScaler` instance.
         var_helper: :class:`VariableHelper` with registered collections.
+        ctxt_mask_type: ``"all"``, ``"charged"``, or ``"neutral"`` to filter
+            context particles by class (requires "class" variable in collection).
 
     Returns:
         Dict with backward-compatible keys:
@@ -140,6 +143,14 @@ def build_ctxt_data(
                 var, x, sin_cos, feature_scaler, var_helper
             )
             features.append(transformed)
+
+        # Apply mask-type filtering for charged/neutral subsets
+        if ctxt_mask_type != "all" and "class" in data:
+            class_vals = data["class"]  # (…, N)
+            if ctxt_mask_type == "charged":
+                mask = mask & (class_vals < 3)
+            elif ctxt_mask_type == "neutral":
+                mask = mask & (class_vals >= 3)
 
         feat_tensor = torch.cat(features, dim=-1)  # (…, N, F)
         # Zero out padding: legacy code applies transforms BEFORE padding,
@@ -353,7 +364,7 @@ def compute_means(
     Excludes variables containing ``class`` or ``charge``.
 
     For bulk init-time computation over the entire dataset (ROOT),
-    see :meth:`ComputedVariables.compute_means_bulk` which uses
+    see :meth:`ComputedVariables.compute_flat_means` which uses
     ``np.add.reduceat`` for efficiency.
 
     Args:

@@ -73,77 +73,16 @@ def calculate_impact_params(
 class ComputedVariables:
     """Computes all derived physics variables at runtime.
 
-    This class centralizes computation logic that was previously duplicated
-    between ROOT and HDF5 backends. All methods are stateless and operate
-    on numpy arrays.
+    All methods are stateless and operate on numpy arrays.
+    compute_flat_* methods expect pre-flattened concatenated arrays (fast, vectorized).
+    compute_ragged_* methods expect ragged per-event object arrays.
 
     Supports:
-    - ptrel: Relative transverse momentum (pt / ht)
-    - charge: Particle charge from pdgId
-    - d0My, z0My: Recalculated impact parameters from vertex positions
     - d0Sig, z0Sig: Impact parameter significance (IP / error)
-    - vz_shifted: Vertex z-coordinate shifted by primary vertex
     - means: Per-event mean of context variables
+    - ht, met_x, met_y, ptrel, charge: Event/particle-level aggregates
+    - PV coordinates, vz_shifted, d0My/z0My: From vertex positions
     """
-
-    @staticmethod
-    def compute_ptrel(pt: np.ndarray, ht: float | np.ndarray) -> np.ndarray:
-        """Compute relative transverse momentum (pt / ht).
-
-        Args:
-            pt: Particle transverse momentum array
-            ht: Scalar sum of all transverse momenta in event
-
-        Returns:
-            Relative pt array (pt/ht), or zeros if ht=0
-        """
-        if isinstance(ht, np.ndarray):
-            # Handle batch case
-            return np.divide(pt, ht, out=np.zeros_like(pt), where=(ht > 0))
-        return pt / ht if ht > 0 else pt * 0
-
-    @staticmethod
-    def compute_charge(pdgId: np.ndarray, class_: np.ndarray) -> np.ndarray:
-        """Compute particle charge from PDG ID.
-
-        Args:
-            pdgId: PDG particle ID array
-            class_: Particle class (0-4, where >2 are neutral)
-
-        Returns:
-            Charge array (+1, 0, -1), with neutrals forced to 0
-
-        Note:
-            If charge is pre-stored in the file, use that instead.
-        """
-        charge = np.sign(pdgId)
-        charge[class_ > 2] = 0  # Force neutrals to zero charge
-        return charge
-
-    @staticmethod
-    def compute_impact_params(
-        eta: np.ndarray,
-        phi: np.ndarray,
-        vx: np.ndarray,
-        vy: np.ndarray,
-        vz: np.ndarray,
-        pv_x: float | np.ndarray,
-        pv_y: float | np.ndarray,
-        pv_z: float | np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Compute d0My and z0My from vertex positions and primary vertex.
-
-        These share scalers with d0/z0 (the "My" suffix is removed in scaler_key).
-
-        Args:
-            eta, phi: Particle kinematics
-            vx, vy, vz: Particle vertex coordinates
-            pv_x, pv_y, pv_z: Primary vertex coordinates
-
-        Returns:
-            Tuple of (d0My, z0My) arrays
-        """
-        return calculate_impact_params(eta, phi, vx, vy, vz, pv_x, pv_y, pv_z)
 
     @staticmethod
     def compute_significance(
@@ -172,27 +111,14 @@ class ComputedVariables:
         return d0_sig, z0_sig
 
     @staticmethod
-    def compute_vz_shifted(vz: np.ndarray, pv_z: float | np.ndarray) -> np.ndarray:
-        """Shift vertex z-coordinate by primary vertex position.
-
-        Args:
-            vz: Particle vertex z-coordinate
-            pv_z: Primary vertex z-coordinate
-
-        Returns:
-            Shifted z-coordinate (vz - pv_z)
-        """
-        return vz - pv_z
-
-    @staticmethod
-    def compute_means_bulk(
+    def compute_flat_means(
         particle_data: dict[str, np.ndarray],
         collection_name: str,
         var_names: list[str],
         n_particles: np.ndarray,
         cumsum: np.ndarray,
     ) -> np.ndarray:
-        """Compute per-event means over all events at once (bulk, numpy-based).
+        """Compute per-event means from flat concatenated arrays.
 
         Used by the eager (ROOT) dataset at init time for pre-computing means
         across the entire dataset using efficient ``np.add.reduceat`` operations.
@@ -203,11 +129,11 @@ class ComputedVariables:
         Excludes variables containing 'class' or 'charge' from the mean calculation.
 
         Args:
-            particle_data: Dictionary of concatenated particle arrays
+            particle_data: Dictionary of flat (concatenated) particle arrays
             collection_name: Collection to compute means for (e.g., 'truth')
             var_names: List of variable names (with collection prefix)
-            n_particles: Array of particle counts per event
-            cumsum: Cumulative sum for indexing
+            n_particles: Per-event particle counts, shape ``(n_events,)``
+            cumsum: Cumulative sum array, shape ``(n_events + 1,)``
 
         Returns:
             Array of shape (n_events, n_vars) with per-event means
@@ -238,25 +164,7 @@ class ComputedVariables:
         return means
 
     @staticmethod
-    def compute_event_aggregates(
-        pt: np.ndarray, phi: np.ndarray
-    ) -> tuple[float, float, float]:
-        """Compute event-level aggregates (ht, met_x, met_y).
-
-        Args:
-            pt: Array of particle transverse momenta
-            phi: Array of particle azimuthal angles
-
-        Returns:
-            Tuple of (ht, met_x, met_y)
-        """
-        met_x = (pt * np.cos(phi)).sum()
-        met_y = (pt * np.sin(phi)).sum()
-        ht = pt.sum()
-        return ht, met_x, met_y
-
-    @staticmethod
-    def compute_bulk_derived(
+    def compute_flat_derived(
         pt_flat: np.ndarray,
         phi_flat: np.ndarray,
         n_particles: np.ndarray,
@@ -264,10 +172,10 @@ class ComputedVariables:
         pdgId_flat: np.ndarray | None = None,
         class_flat: np.ndarray | None = None,
     ) -> dict[str, np.ndarray]:
-        """Compute ht, met_x, met_y, ptrel, charge over all events (vectorized).
+        """Compute ht, met_x, met_y, ptrel, charge from flat concatenated arrays.
 
-        Uses ``np.add.reduceat`` for efficient per-event aggregation over
-        the flat concatenated particle arrays — no Python per-event loop.
+        Uses ``np.add.reduceat`` for efficient per-event aggregation — no Python
+        per-event loop.
 
         Args:
             pt_flat: Flat concatenated pt array for all events.
@@ -312,32 +220,31 @@ class ComputedVariables:
 
         if pdgId_flat is not None and class_flat is not None:
             charge = np.sign(pdgId_flat).astype(np.float32)
-            charge[class_flat > 2] = 0
+            # charge[class_flat > 2] = 0
             result["charge"] = charge
 
         return result
 
     @staticmethod
-    def compute_bulk_pv_coords(
+    def compute_ragged_pv_coords(
         truth_vx: np.ndarray,
         truth_vy: np.ndarray,
         truth_vz: np.ndarray,
-        nevents: int,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Compute primary vertex coordinates from truth particles.
+        """Compute primary vertex coordinates from ragged truth vertex arrays.
 
-        PV is determined per event by majority vote on truth vertex
-        positions.  Only truth particles carry the true vertex info.
+        PV is determined per event by majority vote on truth vertex positions.
+        Only truth particles carry the true vertex info.
 
         Args:
             truth_vx, truth_vy, truth_vz: Ragged arrays of truth vertex
                 coordinates, each of shape ``(nevents,)`` with sub-arrays.
-            nevents: Number of events.
 
         Returns:
             ``(pv_x, pv_y, pv_z)`` — each ``np.float32`` array of shape
             ``(nevents,)``.
         """
+        nevents = len(truth_vx)
         pv_x = np.empty(nevents, dtype=np.float32)
         pv_y = np.empty(nevents, dtype=np.float32)
         pv_z = np.empty(nevents, dtype=np.float32)
@@ -350,27 +257,23 @@ class ComputedVariables:
         return pv_x, pv_y, pv_z
 
     @staticmethod
-    def compute_bulk_vz_shifted(
+    def compute_ragged_vz_shifted(
         vz_ragged: np.ndarray,
         pv_z: np.ndarray,
-        nevents: int,
     ) -> list[np.ndarray]:
-        """Compute vz_shifted for any collection (truth or pflow).
-
-        Simply shifts each particle's vertex z by the event's PV z.
+        """Shift vertex z by the primary vertex z, for ragged per-event arrays.
 
         Args:
             vz_ragged: Ragged array of vertex z, shape ``(nevents,)``.
             pv_z: PV z-coordinate per event, shape ``(nevents,)``.
-            nevents: Number of events.
 
         Returns:
-            List of per-event shifted arrays.
+            List of per-event ``vz - pv_z`` arrays.
         """
-        return [vz_ragged[i] - pv_z[i] for i in range(nevents)]
+        return [vz_ragged[i] - pv_z[i] for i in range(len(pv_z))]
 
     @staticmethod
-    def compute_bulk_ip_params(
+    def compute_ragged_ip_params(
         eta_ragged: np.ndarray,
         phi_ragged: np.ndarray,
         vx_ragged: np.ndarray,
@@ -379,19 +282,15 @@ class ComputedVariables:
         pv_x: np.ndarray,
         pv_y: np.ndarray,
         pv_z: np.ndarray,
-        nevents: int,
     ) -> tuple[list[np.ndarray], list[np.ndarray]]:
-        """Compute d0My and z0My impact parameters (pflow-only).
+        """Compute d0My and z0My impact parameters from ragged per-event arrays.
 
-        Impact parameters quantify the distance of closest approach of
-        a reconstructed track to the primary vertex.  Only meaningful
-        for reconstructed (pflow) particles, not truth.
+        Only meaningful for reconstructed (pflow) particles, not truth.
 
         Args:
             eta_ragged, phi_ragged: Ragged kinematic arrays.
             vx_ragged, vy_ragged, vz_ragged: Ragged vertex arrays.
             pv_x, pv_y, pv_z: PV coordinates, shape ``(nevents,)``.
-            nevents: Number of events.
 
         Returns:
             ``(d0My_list, z0My_list)`` — lists of per-event arrays.
@@ -399,7 +298,7 @@ class ComputedVariables:
         d0_list: list[np.ndarray] = []
         z0_list: list[np.ndarray] = []
 
-        for i in tqdm(range(nevents), desc="Computing impact parameters"):
+        for i in tqdm(range(len(pv_x)), desc="Computing impact parameters"):
             d0, z0 = calculate_impact_params(
                 eta_ragged[i],
                 phi_ragged[i],

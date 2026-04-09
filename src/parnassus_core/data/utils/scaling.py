@@ -178,43 +178,6 @@ class FeatureScaler:
         """
         return self.transforms[name]
 
-    def transform(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """
-        Apply the scaling transformations to the input features.
-
-        Parameters
-        ----------
-        x : dict[str, torch.Tensor]
-            Dictionary of features to be transformed.
-
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            Dictionary of transformed features.
-        """
-        for key, value in x.items():
-            if key in self.transforms:
-                x[key] = self.transforms[key].transform(value)
-        return x
-
-    def inverse_transform(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """
-        Apply the inverse scaling transformations to the input features.
-
-        Parameters
-        ----------
-        x : dict[str, torch.Tensor]
-            Dictionary of features to be inverse transformed.
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            Dictionary of inverse transformed features.
-        """
-        for key, value in x.items():
-            if key in self.transforms:
-                x[key] = self.transforms[key].inverse_transform(value)
-        return x
-
 
 class Unscaler:
     def __init__(
@@ -280,6 +243,29 @@ class Unscaler:
         self.target_collection = target_collection
         self.ctxt_collection = ctxt_collection
 
+    def _unscale_per_particle_vars(self, data, vars_list, new_data_dict, pv_z, unshift):
+        """Unscale a per-particle tensor into new_data_dict using vars_list ordering."""
+        var_idx = 0
+        for var_name in vars_list:
+            if var_idx >= data.shape[-1]:
+                break
+            collection = self.var_helper.get_collection(var_name)
+            assert collection is not None, (
+                f"Context variable {var_name} must belong to a collection."
+            )
+            base_name = self.var_helper.get_base_name(var_name)
+            scaler_key = self.var_helper.scaler_key(var_name)
+            var, index_shift = self.extract_var(data, scaler_key, var_idx, self.sin_cos)
+            var_idx += index_shift
+            var = var.numpy()
+            if base_name == "ptrel":
+                var = var * new_data_dict[f"{collection}_ht"].reshape(-1, 1)
+                base_name = "pt"
+            if base_name == "vz_shifted" and unshift:
+                var = var + pv_z
+                base_name = "vz"
+            new_data_dict[f"{collection}_{base_name}"] = var
+
     def extract_var(self, data, var_name, var_idx, sin_cos=False):
         index_shift = 0
         if var_name.endswith("phi") and sin_cos:
@@ -301,12 +287,13 @@ class Unscaler:
 
     def unscale_variables(self, fs_data, ctxt_dict, target_data=None, unshift=True):
         fs_data = fs_data.cpu()
-        has_target = False
-        if target_data is not None:
+        has_target = target_data is not None
+        if has_target:
             target_data = target_data.cpu()
-            has_target = True
         ctxt_dict = {k: v.cpu() for k, v in ctxt_dict.items()}
         new_data_dict = {}
+
+        # Global context variables
         var_idx = 0
         for var_name in self.ctxt_global_vars:
             collection = self.var_helper.get_collection(var_name)
@@ -328,35 +315,32 @@ class Unscaler:
                     .numpy()
                 )
                 var_idx += 1
-        var_idx = 0
-        for var_name in self.ctxt_vars:
-            if var_idx >= ctxt_dict["ctxt_data"].shape[-1]:
-                break
 
-            collection = self.var_helper.get_collection(var_name)
-            assert collection is not None, (
-                f"Context variable {var_name} must belong to a collection."
+        pv_z = ctxt_dict["pv_coords"][:, -1].numpy().reshape(-1, 1) if unshift else None
+
+        # Per-particle context variables
+        self._unscale_per_particle_vars(
+            ctxt_dict["ctxt_data"], self.ctxt_vars, new_data_dict, pv_z, unshift
+        )
+
+        # Pflow-only context variables (separate tensor)
+        if "pf_ctxt_data" in ctxt_dict:
+            pflow_vars = [
+                v
+                for v in self.ctxt_vars
+                if self.var_helper.get_collection(v) == "pflow"
+            ]
+            self._unscale_per_particle_vars(
+                ctxt_dict["pf_ctxt_data"], pflow_vars, new_data_dict, pv_z, unshift
             )
 
-            base_name = self.var_helper.get_base_name(var_name)
-            scaler_key = self.var_helper.scaler_key(var_name)
-            var, index_shift = self.extract_var(
-                ctxt_dict["ctxt_data"], scaler_key, var_idx, self.sin_cos
-            )
-            var_idx += index_shift
-            var = var.numpy()
-            if base_name == "ptrel":
-                var = var * new_data_dict[f"{collection}_ht"].reshape(-1, 1)
-                base_name = "pt"
-
-            new_data_dict[f"{collection}_{base_name}"] = var
+        # Fast-sim (generated) variables
         var_idx = 0
         for var_name in self.fs_vars:
             collection = self.var_helper.get_collection(var_name)
             assert collection is not None, (
                 f"Feature variable {var_name} must belong to a collection."
             )
-
             base_name = self.var_helper.get_base_name(var_name)
             scaler_key = self.var_helper.scaler_key(var_name)
 
@@ -375,21 +359,19 @@ class Unscaler:
             var_idx += index_shift
 
             if base_name == "ptrel":
-                fs_ = fs_ * new_data_dict[f"{collection}_ht"].reshape(-1, 1)
-                target_ = (
-                    target_ * new_data_dict[f"{collection}_ht"].reshape(-1, 1)
-                    if has_target
-                    else None
-                )
+                ht = new_data_dict[f"{collection}_ht"].reshape(-1, 1)
+                fs_ = fs_ * ht
+                target_ = target_ * ht if has_target else None
                 base_name = "pt"
             if base_name == "vz_shifted" and unshift:
-                pv_z = ctxt_dict["pv_coords"][:, -1].numpy().reshape(-1, 1)
                 fs_ = fs_ + pv_z
                 target_ = target_ + pv_z if has_target else None
                 base_name = "vz"
+
             new_data_dict[f"fs_{base_name}"] = fs_
             if has_target:
                 new_data_dict[f"{collection}_{base_name}"] = target_
+
         if "ctxt_mask" in ctxt_dict:
             new_data_dict["ctxt_mask"] = ctxt_dict["ctxt_mask"].numpy()
         if "fs_mask" in ctxt_dict:

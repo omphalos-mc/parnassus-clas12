@@ -33,8 +33,8 @@ from parnassus_core.data.loaders.base import FileLoader
 
 
 def _maybe_copy(src: np.ndarray) -> np.ndarray:
-    """Return *src* if C-contiguous, otherwise a contiguous copy."""
-    return src if src.flags.c_contiguous else src.copy()
+    """Always return a contiguous array owned by this process (for safety with multi-threading)."""
+    return np.nan_to_num(src.copy())
 
 
 class HDF5FileLoader(FileLoader):
@@ -74,7 +74,6 @@ class HDF5FileLoader(FileLoader):
         self._file: h5py.File | None = None
         self._pid: int | None = None
         self._dss: dict[str, h5py.Dataset] = {}
-        self._bufs: dict[str, np.ndarray] = {}
 
     def _ensure_open(self) -> None:
         """Open the HDF5 file if not already open (lazy / per-worker)."""
@@ -86,11 +85,9 @@ class HDF5FileLoader(FileLoader):
             self._file = h5py.File(self.file_path, "r", swmr=True, libver="latest")
             self._pid = pid
             self._dss = {}
-            self._bufs = {}
             for key in self._file:  # type: ignore
                 key_s = str(key)
                 self._dss[key_s] = cast(h5py.Dataset, self._file[key_s])
-                self._bufs[key_s] = np.array(0, dtype=self._meta[key_s][1])
 
     # ------------------------------------------------------------------
     # Primary read helpers (used by StreamingDataset)
@@ -120,17 +117,16 @@ class HDF5FileLoader(FileLoader):
         """
         self._ensure_open()
         ds = self._dss[collection_name]
-        buf = self._bufs[collection_name]
         n = batch_idx.stop - batch_idx.start
-        buf.resize((n, *ds.shape[1:]), refcheck=False)
+        buf = np.zeros((n, *ds.shape[1:]), dtype=ds.dtype)
         ds.read_direct(buf, batch_idx)
 
         data: dict[str, np.ndarray] = {}
+        valid = _maybe_copy(buf["valid"])
         for field in buf.dtype.names:  # type: ignore[union-attr]
             if field == "valid":
                 continue
             data[field] = _maybe_copy(buf[field])
-        valid = _maybe_copy(buf["valid"])
         return data, valid
 
     def read_events(
@@ -153,9 +149,8 @@ class HDF5FileLoader(FileLoader):
         """
         self._ensure_open()
         ds = self._dss["events"]
-        buf = self._bufs["events"]
         n = batch_idx.stop - batch_idx.start
-        buf.resize((n,), refcheck=False)
+        buf = np.zeros((n,), dtype=ds.dtype)
         ds.read_direct(buf, batch_idx)
 
         result: dict[str, np.ndarray] = {}
@@ -227,12 +222,10 @@ class HDF5FileLoader(FileLoader):
             self._file.close()
             self._file = None
             self._dss.clear()
-            self._bufs.clear()
 
     def __getstate__(self) -> dict:
         """Pickle support: drop the open file handle."""
         state = self.__dict__.copy()
         state["_file"] = None
         state["_dss"] = {}
-        state["_bufs"] = {}
         return state

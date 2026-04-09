@@ -27,6 +27,7 @@ class ParnassusDataModule(LightningDataModule):
         scale_dict: str,
         var_dict: str,
         fs_mask_type: Literal["all", "charged", "neutral"] = "all",
+        ctxt_mask_type: Literal["all", "charged", "neutral"] = "all",
         recalculate_ip: bool = False,
         num_test: int = -1,
         test_batch_size: int = 100,
@@ -67,6 +68,7 @@ class ParnassusDataModule(LightningDataModule):
         self.multiprocessing_context = multiprocessing_context
 
         self.fs_mask_type = fs_mask_type
+        self.ctxt_mask_type = ctxt_mask_type
         self.recalculate_ip = recalculate_ip
 
     def setup_dataset(self, path: str, num_events: int, entry_start: int, mode: str):
@@ -80,6 +82,7 @@ class ParnassusDataModule(LightningDataModule):
             "scale_dict": self.scale_dict,
             "var_dict": self.var_dict,
             "fs_mask_type": self.fs_mask_type,
+            "ctxt_mask_type": self.ctxt_mask_type,
             "reduce_ds": num_events,
             "entry_start": entry_start,
             "mode": mode,

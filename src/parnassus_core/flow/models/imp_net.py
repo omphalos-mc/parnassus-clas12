@@ -20,6 +20,7 @@ class ImpactNetwork(nn.Module):
         fourier_embedding: nn.Module | None = None,
         encoder: nn.Module | None = None,
         resnet: nn.Module | None = None,
+        concat_pf_ctxt: bool = False,
     ):
         super().__init__()
         self.time_shape = (-1, 1, 1)  # (batch_size, 1, 1)
@@ -32,6 +33,7 @@ class ImpactNetwork(nn.Module):
         self.encoder = encoder
         self.resnet = resnet
         self.fourier_embedding = fourier_embedding
+        self.concat_pf_ctxt = concat_pf_ctxt
 
         self.context_manager = nullcontext()
         self.attn_type = (
@@ -122,15 +124,16 @@ class ImpactNetwork(nn.Module):
                 attn_mask_fs = fs_mask
                 attn_mask_ctxt = ctxt_mask
             with self.context_manager:
-                fs_embd, _ = self.encoder(
+                fs_embd, _, _ = self.encoder(
                     seq_a=fs_embd,
                     seq_b=ctxt_embd,
                     ctxt=global_embd,
                     mask_a=attn_mask_fs,
                     mask_b=attn_mask_ctxt,
                 )
+        if self.concat_pf_ctxt and "pf_ctxt_embd" in ctxt_embd_dict:
+            fs_embd = torch.cat([fs_embd, ctxt_embd_dict["pf_ctxt_embd"]], dim=-1)
         if self.resnet is not None:
             fs_embd = self.resnet(fs_embd.to(global_embd.dtype))
-
         fs_out = self.fs_out_net(fs_embd, ctxt=global_embd)
-        return fs_out
+        return fs_out, None

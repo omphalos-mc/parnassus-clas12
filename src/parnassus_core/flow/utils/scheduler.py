@@ -117,7 +117,7 @@ class CosineAnnealingWarmupRestarts(_LRScheduler):
                 self.cur_cycle_steps = self.first_cycle_steps
                 self.step_in_cycle = epoch
 
-        self.max_lr = self.base_max_lr * (self.gamma**self.cycle)
+        self.max_lr = max(self.base_max_lr * (self.gamma**self.cycle), self.min_lr)
         self.last_epoch = math.floor(epoch)
 
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
@@ -127,6 +127,22 @@ class CosineAnnealingWarmupRestarts(_LRScheduler):
 
 
 class WarmupDecayConstLR(_LRScheduler):
+    """Learning rate scheduler with linear warmup, followed by smooth decay to a constant minimum learning rate.
+
+    Parameters
+    ----------
+    optimizer : Optimizer
+        Wrapped optimizer.
+    warmup_steps : int
+        Number of steps for linear warmup.
+    decay_steps : int
+        Number of steps for smooth decay after warmup.
+    min_lr : float
+        Minimum learning rate after decay.
+    last_epoch : int, optional
+        The index of last epoch. Default: -1.
+    """
+
     def __init__(
         self,
         optimizer,

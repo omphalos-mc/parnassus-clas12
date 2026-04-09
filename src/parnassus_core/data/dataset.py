@@ -42,6 +42,10 @@ class EagerDataset(PhysicsDatasetBase):
         Apply sin/cos transform to phi variables.
     zero_neutral_vtx : bool
         Zero vertex-related variables for neutral particles.
+    fs_mask_type : ``"all"`` | ``"charged"`` | ``"neutral"``
+        Target particles mask type.
+    ctxt_mask_type : ``"all"`` | ``"charged"`` | ``"neutral"``
+        Context particles mask type.
     reduce_ds : float | int
         Dataset size limit (``<1.0`` fraction, ``>=1.0`` count).
     entry_start : int
@@ -65,6 +69,7 @@ class EagerDataset(PhysicsDatasetBase):
         sin_cos: bool,
         zero_neutral_vtx: bool,
         fs_mask_type: Literal["all", "charged", "neutral"] = "all",
+        ctxt_mask_type: Literal["all", "charged", "neutral"] = "all",
         reduce_ds: float | int = 1.0,
         entry_start: int = 0,
         mode: Literal["train", "test", "eval"] = "train",
@@ -80,6 +85,7 @@ class EagerDataset(PhysicsDatasetBase):
             sin_cos=sin_cos,
             zero_neutral_vtx=zero_neutral_vtx,
             fs_mask_type=fs_mask_type,
+            ctxt_mask_type=ctxt_mask_type,
             mode=mode,
             recalculate_ip=recalculate_ip,
         )
@@ -129,11 +135,10 @@ class EagerDataset(PhysicsDatasetBase):
 
         if recalculate_ip:
             ref_data = raw_collections[ref_coll]
-            pv_x, pv_y, pv_z = ComputedVariables.compute_bulk_pv_coords(
+            pv_x, pv_y, pv_z = ComputedVariables.compute_ragged_pv_coords(
                 ref_data["vx"],
                 ref_data["vy"],
                 ref_data["vz"],
-                nevents,
             )
 
         # ---- Apply event mask, merge ragged → flat, preprocess ----
@@ -151,10 +156,9 @@ class EagerDataset(PhysicsDatasetBase):
 
             if pv_z is not None and "vz" in raw_data:
                 # vz_shifted: for ALL collections (truth + pflow)
-                vz_shifted = ComputedVariables.compute_bulk_vz_shifted(
+                vz_shifted = ComputedVariables.compute_ragged_vz_shifted(
                     raw_data["vz"],
                     pv_z,
-                    nevents,
                 )
                 coll_flat["vz_shifted"] = np.concatenate(
                     np.array(vz_shifted, dtype=object)[event_mask]
@@ -162,7 +166,7 @@ class EagerDataset(PhysicsDatasetBase):
 
                 # d0My, z0My: only for non-reference (pflow) collections
                 if coll_name != ref_coll and "eta" in raw_data:
-                    d0_list, z0_list = ComputedVariables.compute_bulk_ip_params(
+                    d0_list, z0_list = ComputedVariables.compute_ragged_ip_params(
                         raw_data["eta"],
                         raw_data["phi"],
                         raw_data["vx"],
@@ -171,7 +175,6 @@ class EagerDataset(PhysicsDatasetBase):
                         pv_x,  # type: ignore
                         pv_y,  # type: ignore
                         pv_z,
-                        nevents,
                     )
                     coll_flat["d0My"] = np.concatenate(
                         np.array(d0_list, dtype=object)[event_mask]
@@ -210,7 +213,7 @@ class EagerDataset(PhysicsDatasetBase):
         for coll_name in self._collections_to_load:
             data = self._particle_data[coll_name]
             info = self._collection_info[coll_name]
-            derived = ComputedVariables.compute_bulk_derived(
+            derived = ComputedVariables.compute_flat_derived(
                 pt_flat=data["pt"],
                 phi_flat=data["phi"],
                 n_particles=info.n_particles,  # type: ignore
@@ -245,7 +248,7 @@ class EagerDataset(PhysicsDatasetBase):
                     f"{primary_coll}_{k}": v
                     for k, v in self._particle_data[primary_coll].items()
                 }
-                self._precomputed_means = ComputedVariables.compute_means_bulk(
+                self._precomputed_means = ComputedVariables.compute_flat_means(
                     prefixed_data,
                     primary_coll,
                     self.ctxt_vars,

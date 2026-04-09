@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 
 from parnassus_core.flow.models.wrapper import FlowLightning
-from parnassus_core.flow.utils.scaling import FeatureScaler, Unscaler
+from parnassus_core.data.utils.scaling import FeatureScaler, Unscaler
 
 from parnassus_core.evaluation.config import EvaluationConfig, ModelConfig
 

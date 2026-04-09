@@ -18,6 +18,7 @@ class ParticleNetwork(nn.Module):
         global_embedding: nn.Module,
         encoder: nn.Module,
         fs_out_net: nn.Module,
+        inter_out_net: nn.Module | None = None,
     ):
         super().__init__()
 
@@ -29,13 +30,18 @@ class ParticleNetwork(nn.Module):
         self.global_embedding = global_embedding
         self.encoder = encoder
         self.fs_out_net = fs_out_net
+        self.inter_out_net = inter_out_net
 
         self.context_manager = nullcontext()
         self.attn_type = self.change_backend(encoder.attn_type)
 
     def create_padding_mask(self, pads_kv):
+        S = pads_kv.size(1)
+
         def padding(b, h, q_idx, kv_idx):
-            return pads_kv[b, kv_idx]
+            is_valid_idx = kv_idx < S
+            safe_kv_idx = torch.clamp(kv_idx, max=S - 1)
+            return is_valid_idx & pads_kv[b, safe_kv_idx]
 
         return padding
 
@@ -54,7 +60,7 @@ class ParticleNetwork(nn.Module):
         fs_data: torch.Tensor,
         timestep: torch.Tensor,
         ctxt_dict: dict[str, torch.Tensor],
-    ):
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         fs_mask = ctxt_dict["fs_mask"]
         fs_embd = self.fs_init_net(fs_data)
 
@@ -94,12 +100,24 @@ class ParticleNetwork(nn.Module):
             attn_mask_ctxt = ctxt_mask
             attn_mask_fs = fs_mask
         with self.context_manager:
-            fs_embd, _ = self.encoder(
+            fs_embd, _, intermediate_output = self.encoder(
                 seq_a=fs_embd,
                 seq_b=ctxt_embd,
                 ctxt=global_embd,
                 mask_a=attn_mask_fs,
                 mask_b=attn_mask_ctxt,
             )
-        fs_out = self.fs_out_net(fs_embd.to(global_embd.dtype), ctxt=global_embd)
-        return fs_out
+        fs_embd = fs_embd.to(global_embd.dtype)
+        if isinstance(self.fs_out_net, nn.ModuleList):
+            fs_out = []
+            for net in self.fs_out_net:
+                fs_out.append(net(fs_embd, ctxt=global_embd))
+            fs_out = torch.cat(fs_out, dim=-1)
+        else:
+            fs_out = self.fs_out_net(fs_embd.to(global_embd.dtype), ctxt=global_embd)
+        if self.inter_out_net is not None:
+            inter_out = self.inter_out_net(
+                intermediate_output.to(global_embd.dtype), ctxt=global_embd
+            )
+            return fs_out, inter_out
+        return fs_out, None

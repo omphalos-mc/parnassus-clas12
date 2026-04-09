@@ -56,6 +56,10 @@ def submit_jobs(config, tag="tmp", dry_run=False):
 
     # Iterate over parent groups and subgroups
     for parent_group, subgroups in file_groups.items():
+        if not isinstance(subgroups, dict):
+            subgroups = {
+                "": subgroups
+            }  # Handle case where files are directly under parent group
         for subgroup_name, file_list in subgroups.items():
             # Construct full group path: parent_group/subgroup_name
             full_group_path = os.path.join(parent_group, subgroup_name)

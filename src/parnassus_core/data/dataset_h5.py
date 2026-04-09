@@ -63,6 +63,7 @@ class StreamingDataset(PhysicsDatasetBase):
         sin_cos: bool,
         zero_neutral_vtx: bool,
         fs_mask_type: Literal["all", "charged", "neutral"] = "all",
+        ctxt_mask_type: Literal["all", "charged", "neutral"] = "all",
         reduce_ds: float | int = 1.0,
         entry_start: int = 0,
         mode: Literal["train", "test", "eval"] = "train",
@@ -76,6 +77,7 @@ class StreamingDataset(PhysicsDatasetBase):
             sin_cos=sin_cos,
             zero_neutral_vtx=zero_neutral_vtx,
             fs_mask_type=fs_mask_type,
+            ctxt_mask_type=ctxt_mask_type,
             mode=mode,
             recalculate_ip=recalculate_ip,
         )
