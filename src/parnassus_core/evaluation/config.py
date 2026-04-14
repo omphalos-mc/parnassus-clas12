@@ -1,7 +1,7 @@
 from typing import Self
 import yaml
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from rich import print as rprint
 from parnassus_core.flow.sampling import SamplerType
@@ -43,7 +43,7 @@ class DatasetConfig:
 class DataConfig:
     max_particles: int
     datasets: list[DatasetConfig]
-    top_folder: str = ""
+    top_folder: str | Path = ""
 
     @classmethod
     def from_dict(cls, data_dict: dict) -> Self:
@@ -62,15 +62,56 @@ class DataConfig:
         return cls(max_particles, datasets=datasets, top_folder=top_folder)
 
 
+@dataclass(frozen=True)
+class EvaluationVarConfig:
+    """Parsed output of a YAML variable config file."""
+
+    fs_vars: dict[str, list[str]]
+    ctxt_vars: list[str]
+    ctxt_global_vars: list[str]
+    event_vars: list[str] = field(default_factory=lambda: ["eventNumber"])
+
+    def __post_init__(self):
+        assert "event" in self.fs_vars, "fs_vars must contain an 'event' key."
+        assert "particle" in self.fs_vars, "fs_vars must contain a 'particle' key."
+
+    @staticmethod
+    def from_yaml(var_dict: str) -> "EvaluationVarConfig":
+        """Parse YAML variable config into a :class:`VarConfig`.
+
+        Handles both new ``vars_to_load`` dict and legacy
+        ``{coll}_vars_to_load`` format.
+
+        Example YAML::
+
+            event_vars: [eventNumber, Sim_PV_x, Sim_PV_y, Sim_PV_z]
+            variable_remapping:
+              Sim_PV_x: pv_x
+              Sim_PV_y: pv_y
+              Sim_PV_z: pv_z
+        """
+        with open(var_dict) as f:
+            cfg = yaml.safe_load(f)
+
+        return EvaluationVarConfig(
+            ctxt_vars=cfg["ctxt_vars"],
+            fs_vars=cfg["fs_vars"],
+            ctxt_global_vars=cfg["ctxt_global_vars"],
+            event_vars=cfg.get("event_vars", ["eventNumber"]),
+        )
+
+
 @dataclass
 class EvaluationConfig:
     scale_dict: str
     var_dict: str
-    eval_path: str | Path
+    eval_path: Path
+    var_config: EvaluationVarConfig
     data_config: DataConfig
     event_model: ModelConfig
     particle_model: ModelConfig
     impact_model: ModelConfig | None = None
+    recalculate_ip: bool = False
 
     @classmethod
     def from_yaml(cls, yaml_path: str | Path) -> Self:
@@ -106,12 +147,16 @@ class EvaluationConfig:
             else None
         )
 
+        var_config = EvaluationVarConfig.from_yaml(var_dict)
+
         return cls(
             eval_path=eval_path,
             scale_dict=scale_dict,
             var_dict=var_dict,
+            var_config=var_config,
             data_config=data_config,
             event_model=event_model,
             particle_model=particle_model,
             impact_model=impact_model,
+            recalculate_ip=config_data.get("recalculate_ip", False),
         )

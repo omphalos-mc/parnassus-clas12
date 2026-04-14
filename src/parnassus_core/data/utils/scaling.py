@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from collections import defaultdict
 
@@ -145,7 +146,7 @@ def get_empty_transform() -> VarTransform:
 
 
 class FeatureScaler:
-    def __init__(self, scale_dict: str):
+    def __init__(self, scale_dict: str, class_based_scaling: bool = False):
         """
         Initialize the FeatureScaler with a path to a YAML file containing scaling parameters.
 
@@ -158,9 +159,33 @@ class FeatureScaler:
 
         with open(scale_dict, "r") as f:
             self.scale_dict = yaml.safe_load(f)
+
+        self.class_based_scaling = class_based_scaling
+        self.class_transforms: dict[int, dict[str, VarTransform]] = {}
+        self._class_var_transforms: dict[str, list[tuple[int, VarTransform]]] = (
+            defaultdict(list)
+        )
         self.transforms = defaultdict(get_empty_transform)
         for name, config in self.scale_dict.items():
+            if name.startswith("class_") and self.class_based_scaling:
+                class_id = int(name.split("_")[1])
+                if not isinstance(config, dict):
+                    raise ValueError(
+                        f"Class config '{name}' must be a mapping of variable transforms."
+                    )
+                self.class_transforms[class_id] = defaultdict(get_empty_transform)
+                for var_name, var_cfg in config.items():
+                    tr = VarTransform(f"{name}.{var_name}", var_cfg)
+                    self.class_transforms[class_id][var_name] = tr
+                    self._class_var_transforms[var_name].append((class_id, tr))
+                continue
+
             self.transforms[name] = VarTransform(name, config)
+
+        if self.class_based_scaling and not self.class_transforms:
+            raise ValueError(
+                "class_based_scaling is enabled but no class_N transform blocks were found."
+            )
 
     def __getitem__(self, name: str) -> VarTransform:
         """
@@ -177,6 +202,96 @@ class FeatureScaler:
             The VarTransform object for the specified feature.
         """
         return self.transforms[name]
+
+    def _apply_class_transforms(
+        self,
+        name: str,
+        x: torch.Tensor,
+        particle_class: torch.Tensor | None,
+        particle_class_masks: dict[int, torch.Tensor] | None,
+        particle_class_indices: dict[int, tuple[torch.Tensor, ...]] | None,
+        inverse: bool,
+    ) -> torch.Tensor:
+        if not self.class_based_scaling or particle_class is None:
+            transform = self[name]
+            return transform.inverse_transform(x) if inverse else transform.transform(x)
+
+        class_items = self._class_var_transforms.get(name)
+        if not class_items:
+            # Identity fallback for variables without class-specific transforms.
+            return x
+
+        class_tensor = None
+        index_lookup = particle_class_indices
+        if index_lookup is None:
+            index_lookup = particle_class_masks
+        if index_lookup is None:
+            class_tensor = particle_class.to(device=x.device)
+            if class_tensor.ndim == x.ndim - 1:
+                class_tensor = class_tensor.unsqueeze(-1)
+
+        out = None
+        for class_id, tr in class_items:
+            indexer = None
+            if index_lookup is not None and class_id in index_lookup:
+                indexer = index_lookup[class_id]
+            else:
+                assert class_tensor is not None
+                indexer = class_tensor == class_id
+
+            if isinstance(indexer, tuple):
+                if not indexer or indexer[0].numel() == 0:
+                    continue
+            else:
+                if indexer.ndim == x.ndim - 1:
+                    indexer = indexer.unsqueeze(-1)
+                if not indexer.any():
+                    continue
+
+            if out is None:
+                out = x.clone()
+            selected = x[indexer]
+            out[indexer] = (
+                tr.inverse_transform(selected) if inverse else tr.transform(selected)
+            )
+
+        return out if out is not None else x
+
+    def transform(
+        self,
+        name: str,
+        x: torch.Tensor,
+        particle_class: torch.Tensor | None = None,
+        particle_class_masks: dict[int, torch.Tensor] | None = None,
+        particle_class_indices: dict[int, tuple[torch.Tensor, ...]] | None = None,
+    ) -> torch.Tensor:
+        """Apply forward transform, optionally conditioned on per-particle class IDs."""
+        return self._apply_class_transforms(
+            name,
+            x,
+            particle_class,
+            particle_class_masks,
+            particle_class_indices,
+            inverse=False,
+        )
+
+    def inverse_transform(
+        self,
+        name: str,
+        x: torch.Tensor,
+        particle_class: torch.Tensor | None = None,
+        particle_class_masks: dict[int, torch.Tensor] | None = None,
+        particle_class_indices: dict[int, tuple[torch.Tensor, ...]] | None = None,
+    ) -> torch.Tensor:
+        """Apply inverse transform, optionally conditioned on per-particle class IDs."""
+        return self._apply_class_transforms(
+            name,
+            x,
+            particle_class,
+            particle_class_masks,
+            particle_class_indices,
+            inverse=True,
+        )
 
 
 class Unscaler:
@@ -243,8 +358,35 @@ class Unscaler:
         self.target_collection = target_collection
         self.ctxt_collection = ctxt_collection
 
-    def _unscale_per_particle_vars(self, data, vars_list, new_data_dict, pv_z, unshift):
-        """Unscale a per-particle tensor into new_data_dict using vars_list ordering."""
+    def _unscale_per_particle_vars(
+        self,
+        data: torch.Tensor,
+        vars_list: list[str],
+        new_data_dict: dict,
+        pv_z: np.ndarray,
+        unshift: bool,
+    ) -> torch.Tensor | None:
+        """Unscale a per-particle tensor into new_data_dict using vars_list ordering.
+
+        Parameters
+        ----------
+        data : torch.Tensor
+            The input tensor to unscale.
+        vars_list : list[str]
+            The list of variable names to unscale.
+        new_data_dict : dict
+            The dictionary to store the unscaled variables.
+        pv_z : float
+            The primary vertex z-coordinate.
+        unshift : bool
+            Whether to unshift the variables.
+
+        Returns
+        -------
+        particle_class : torch.Tensor
+            Class IDs extracted from one-hot features, if present; otherwise None.
+        """
+        particle_class = self._extract_class_ids(data, vars_list)
         var_idx = 0
         for var_name in vars_list:
             if var_idx >= data.shape[-1]:
@@ -255,7 +397,13 @@ class Unscaler:
             )
             base_name = self.var_helper.get_base_name(var_name)
             scaler_key = self.var_helper.scaler_key(var_name)
-            var, index_shift = self.extract_var(data, scaler_key, var_idx, self.sin_cos)
+            var, index_shift = self.extract_var(
+                data,
+                scaler_key,
+                var_idx,
+                self.sin_cos,
+                particle_class=particle_class,
+            )
             var_idx += index_shift
             var = var.numpy()
             if base_name == "ptrel":
@@ -265,8 +413,38 @@ class Unscaler:
                 var = var + pv_z
                 base_name = "vz"
             new_data_dict[f"{collection}_{base_name}"] = var
+        return particle_class
 
-    def extract_var(self, data, var_name, var_idx, sin_cos=False):
+    def _extract_class_ids(
+        self, data: torch.Tensor, vars_list: list[str]
+    ) -> torch.Tensor | None:
+        """Decode class IDs from one-hot class features for class-aware inverse scaling."""
+        var_idx = 0
+        for var_name in vars_list:
+            if var_idx >= data.shape[-1]:
+                break
+            base_name = self.var_helper.get_base_name(var_name)
+            scaler_key = self.var_helper.scaler_key(var_name)
+            if scaler_key.endswith("phi") and self.sin_cos:
+                var_idx += 2
+            elif scaler_key.endswith("charge"):
+                var_idx += 3
+            elif scaler_key.endswith("class"):
+                return data[..., var_idx : var_idx + 5].argmax(-1)
+            else:
+                var_idx += 1
+            if base_name.endswith("class"):
+                return data[..., var_idx - 5 : var_idx].argmax(-1)
+        return None
+
+    def extract_var(
+        self,
+        data: torch.Tensor,
+        var_name: str,
+        var_idx: int,
+        sin_cos: bool = False,
+        particle_class: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, int]:
         index_shift = 0
         if var_name.endswith("phi") and sin_cos:
             var = torch.atan2(
@@ -281,11 +459,39 @@ class Unscaler:
             var = data[..., var_idx : var_idx + 5].argmax(-1)
             index_shift = 5
         else:
-            var = self.feature_scaler[var_name].inverse_transform(data[..., var_idx])
+            var = self.feature_scaler.inverse_transform(
+                var_name,
+                data[..., var_idx],
+                particle_class=particle_class,
+            )
             index_shift = 1
         return var, index_shift
 
-    def unscale_variables(self, fs_data, ctxt_dict, target_data=None, unshift=True):
+    def unscale_variables(
+        self,
+        fs_data: torch.Tensor,
+        ctxt_dict: dict[str, torch.Tensor],
+        target_data: torch.Tensor | None = None,
+        unshift: bool = True,
+    ) -> dict[str, np.ndarray]:
+        """Unscale features from tensors and store in new_data_dict.
+
+        Parameters
+        ----------
+        fs_data : torch.Tensor
+            The fast simulation data tensor to unscale.
+        ctxt_dict : dict[str, torch.Tensor]
+            Dictionary containing context tensors to unscale.
+        target_data : torch.Tensor, optional
+            The target data tensor to unscale (if available), by default None.
+        unshift : bool, optional
+            Whether to unshift the vz variable by adding back the primary vertex z, by default True.
+
+        Returns
+        -------
+        new_data_dict : dict[str, np.ndarray]
+            A dictionary mapping variable names to their unscaled numpy arrays.
+        """
         fs_data = fs_data.cpu()
         has_target = target_data is not None
         if has_target:
@@ -324,17 +530,28 @@ class Unscaler:
         )
 
         # Pflow-only context variables (separate tensor)
+        pf_class = None
         if "pf_ctxt_data" in ctxt_dict:
             pflow_vars = [
                 v
                 for v in self.ctxt_vars
                 if self.var_helper.get_collection(v) == "pflow"
             ]
-            self._unscale_per_particle_vars(
+            pf_class = self._unscale_per_particle_vars(
                 ctxt_dict["pf_ctxt_data"], pflow_vars, new_data_dict, pv_z, unshift
             )
 
         # Fast-sim (generated) variables
+        if pf_class is not None and self.target_collection == "pflow":
+            fs_class = pf_class
+            target_class = pf_class if has_target else None
+        else:
+            fs_class = self._extract_class_ids(fs_data, self.fs_vars)
+            target_class = (
+                self._extract_class_ids(target_data, self.fs_vars)
+                if has_target
+                else None
+            )
         var_idx = 0
         for var_name in self.fs_vars:
             collection = self.var_helper.get_collection(var_name)
@@ -345,14 +562,22 @@ class Unscaler:
             scaler_key = self.var_helper.scaler_key(var_name)
 
             fs_, index_shift = self.extract_var(
-                fs_data, scaler_key, var_idx, self.sin_cos
+                fs_data,
+                scaler_key,
+                var_idx,
+                self.sin_cos,
+                particle_class=fs_class,
             )
             fs_ = fs_.numpy()
 
             target_ = None
             if has_target:
                 target_, _ = self.extract_var(
-                    target_data, scaler_key, var_idx, self.sin_cos
+                    target_data,
+                    scaler_key,
+                    var_idx,
+                    self.sin_cos,
+                    particle_class=target_class,
                 )
                 target_ = target_.numpy()
 
@@ -365,7 +590,8 @@ class Unscaler:
                 base_name = "pt"
             if base_name == "vz_shifted" and unshift:
                 fs_ = fs_ + pv_z
-                target_ = target_ + pv_z if has_target else None
+                if has_target and target_ is not None:
+                    target_ = target_ + pv_z
                 base_name = "vz"
 
             new_data_dict[f"fs_{base_name}"] = fs_

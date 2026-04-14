@@ -1,0 +1,125 @@
+event_vars:
+  ht:
+    mean: 410.115
+    std: 422.9132
+    min: 0.0
+    max: 4991.8008
+  met_x:
+    mean: -0.1552
+    std: 25.7858
+    min: -342.7267
+    max: 312.0745
+  met_y:
+    mean: 0.1663
+    std: 25.4105
+    min: -220.5578
+    max: 275.9616
+  npart:
+    mean: 110.0779
+    std: 68.525
+    min: 0.0
+    max: 400.0
+  pv_x:
+    mean: 0.244
+    std: 0.0014
+    min: 0.2387
+    max: 0.2492
+  pv_y:
+    mean: 0.3929
+    std: 0.0014
+    min: 0.3862
+    max: 0.3982
+  pv_z:
+    mean: 0.4297
+    std: 6.1837
+    min: -25.3007
+    max: 22.5534
+  actualNumPU:
+    mean: 0.0
+    std: 0.0
+    min: 0.0
+    max: 0.0
+  trueNumPU:
+    mean: 0.0
+    std: 0.0
+    min: 0.0
+    max: 0.0
+particle_vars:
+  pt:
+    mean: 3.7257
+    std: 13.656
+    min: 0.25
+    max: 1649.9086
+  eta:
+    mean: -0.0031
+    std: 1.364
+    min: -2.7
+    max: 2.7
+  phi:
+    mean: 0.0006
+    std: 1.812
+    min: -3.1416
+    max: 3.1416
+  ptrel:
+    mean: 0.0091
+    std: 0.019
+    min: 5.124593371874653e-05
+    max: 1.0
+  class:
+    mean: 1.577
+    std: 1.8647
+    min: 0.0
+    max: 4.0
+  vx:
+    mean: -0.0013
+    std: 2.3906
+    min: -9.1325
+    max: 10.4167
+    fn: asinh
+    fn_scale: 0.006
+    fn_shift: -0.244
+  vy:
+    mean: -0.0065
+    std: 2.3948
+    min: -9.0438
+    max: 9.6608
+    fn: asinh
+    fn_scale: 0.0059
+    fn_shift: -0.3928
+  vz_shifted:
+    mean: 0.0033
+    std: 1.5939
+    min: -8.2759
+    max: 8.8401
+    fn_scale: 0.1
+    fn: asinh
+  d0:
+    mean: -0.0152
+    std: 1.4227
+    min: -6.3633
+    max: 7.6299
+    fn_scale: 0.1
+    fn: asinh
+  d0Error:
+    mean: 0.1907
+    std: 1.2269
+    min: -2.267
+    max: 5.8456
+    fn_shift: 1.0e-06
+    fn: log
+    fn_scale: 0.0076
+  z0:
+    mean: 0.0034
+    std: 1.5937
+    min: -8.2759
+    max: 8.8401
+    fn_scale: 0.1
+    fn: asinh
+  z0Error:
+    mean: 0.547
+    std: 1.6707
+    min: -2.1417
+    max: 7.7215
+    fn_shift: 1.0e-06
+    fn: log
+    fn_scale: 0.0112

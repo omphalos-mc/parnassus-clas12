@@ -66,4 +66,6 @@ SAMPLE_LABELS = {
     "ttbar": r"$t\bar{t}$",
     "qcd_470": r"QCD $470$",
     "qcd_600": r"QCD $600$",
+    "qcd15to3000": r"QCD $15-3000$",
+    "dyjets": r"$Z/\gamma^* \to \ell\ell$",
 }

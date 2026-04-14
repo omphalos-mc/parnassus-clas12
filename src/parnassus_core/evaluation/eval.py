@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from rich import print as rprint
 
-from parnassus_core.experiments.cms_2011.dataset import CMSDataset
+from parnassus_core.data import EagerDataset
 
 from parnassus_core.evaluation.config import EvaluationConfig
 from parnassus_core.evaluation.model import EvaluationModel
@@ -37,39 +37,40 @@ def main():
     for ds_config in config.data_config.datasets:
         rprint(f"[bold blue]Evaluating on dataset:[/bold blue] {ds_config.path}")
         eval_subpath = config.eval_path / ds_config.name
-        dataset = CMSDataset(
+        dataset = EagerDataset(
             ds_config.path,
-            config.data_config.max_particles,
+            max_particles=config.data_config.max_particles,
             train_type="event",
             sin_cos=True,
-            zero_neutral_vtx=True,
+            zero_neutral_vtx=False,
             scale_dict=config.scale_dict,
             var_dict=config.var_dict,
             reduce_ds=args.n_events if args.n_events else ds_config.n_events,
             entry_start=0,
             mode="eval",
+            recalculate_ip=config.recalculate_ip,
         )
         loader = DataLoader(
             dataset,
-            num_workers=6,
+            num_workers=0,
             batch_size=args.batch_size,
             shuffle=False,
             pin_memory=False,
         )
         n_events = len(dataset)
         l_tr_data = {
-            key.replace("truth_", "").replace("ptrel", "pt"): np.zeros(
-                (n_events, dataset.max_particles)
-            )
+            key.replace("truth_", "")
+            .replace("ptrel", "pt")
+            .replace("_shifted", ""): np.zeros((n_events, dataset.max_particles))
             for key in model.ctxt_vars + ["ind"]
         }
-        fs_vars = model.fs_vars + ["ind"]
+        fs_vars = model.fs_vars["particle"] + ["ind"]
         if config.impact_model is not None:
-            fs_vars += ["d0", "d0Error", "z0", "z0Error"]
+            fs_vars += model.fs_vars["impact"]
         l_fs_data = {
-            key.replace("pflow_", "").replace("ptrel", "pt"): np.zeros(
-                (n_events, dataset.max_particles)
-            )
+            key.replace("pflow_", "")
+            .replace("ptrel", "pt")
+            .replace("_shifted", ""): np.zeros((n_events, dataset.max_particles))
             for key in fs_vars
         }
         l_eventNumber = np.zeros(n_events, dtype=np.int32)
@@ -80,12 +81,10 @@ def main():
                 if isinstance(batch[key], torch.Tensor):
                     batch[key] = batch[key].to(device)
             sampled_data = model.generate_event(batch)
-            batch_size = None
+            batch_size = len(sampled_data["eventNumber"])
             for key in l_tr_data:
                 if key != "ind":
-                    if batch_size is None:
-                        batch_size = sampled_data["tr_" + key].shape[0]
-                    l_tr_data[key][n : n + batch_size] = sampled_data["tr_" + key]
+                    l_tr_data[key][n : n + batch_size] = sampled_data["truth_" + key]
                 else:
                     l_tr_data[key][n : n + batch_size] = sampled_data["ctxt_mask"] > 0
             for key in l_fs_data:
@@ -99,8 +98,8 @@ def main():
 
         for key in l_fs_data.keys():
             l_fs_data[key] = l_fs_data[key][:n]
-            if key in l_tr_data:
-                l_tr_data[key] = l_tr_data[key][:n]
+        for key in l_tr_data.keys():
+            l_tr_data[key] = l_tr_data[key][:n]
         l_eventNumber = l_eventNumber[:n]
         eval_subpath = eval_subpath.with_stem(
             eval_subpath.stem + f"_eval_{(n // 1000):d}k{args.suffix}.root"
@@ -109,13 +108,19 @@ def main():
             file["evt_tree"] = {
                 "pflow": ak.zip(
                     {
-                        key: ak.Array(l_fs_data[key].astype(np.float32).tolist())
+                        key: ak.values_astype(
+                            ak.Array(l_fs_data[key].astype(np.float32).tolist()),
+                            np.float32,
+                        )
                         for key in l_fs_data.keys()
                     }
                 ),
                 "truth": ak.zip(
                     {
-                        key: ak.Array(l_tr_data[key].astype(np.float32).tolist())
+                        key: ak.values_astype(
+                            ak.Array(l_tr_data[key].astype(np.float32).tolist()),
+                            np.float32,
+                        )
                         for key in l_tr_data.keys()
                     }
                 ),

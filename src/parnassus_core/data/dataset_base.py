@@ -19,10 +19,8 @@ Subclasses
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 from typing import Literal
 
-import yaml
 from torch import Tensor
 from torch.utils.data import Dataset
 
@@ -32,20 +30,8 @@ from parnassus_core.data.physics_data import (
     build_fs_data,
     compute_means,
 )
-from parnassus_core.data.utils.variable_helper import VariableHelper
+from parnassus_core.data.utils.variable_helper import VariableHelper, VarConfig
 from parnassus_core.data.utils.scaling import FeatureScaler
-
-
-@dataclass(frozen=True)
-class VarConfig:
-    """Parsed output of a YAML variable config file."""
-
-    ctxt_vars: list[str]
-    fs_vars: list[str]
-    ctxt_global_vars: list[str]
-    vars_to_load: dict[str, list[str]]
-    event_vars: list[str] = field(default_factory=lambda: ["eventNumber"])
-    variable_remapping: dict[str, str] = field(default_factory=dict)
 
 
 class PhysicsDatasetBase(Dataset, ABC):
@@ -72,6 +58,8 @@ class PhysicsDatasetBase(Dataset, ABC):
     mode : ``"train"`` | ``"test"`` | ``"eval"``
     recalculate_ip : bool
         Recompute impact parameters from vertex positions.
+    class_based_scaling : bool
+        Whether to use class-aware scaling (requires one-hot class features).
     """
 
     # Variables zeroed for neutrals when zero_neutral_vtx is True.
@@ -105,11 +93,14 @@ class PhysicsDatasetBase(Dataset, ABC):
         ctxt_mask_type: Literal["all", "charged", "neutral"] = "all",
         mode: Literal["train", "test", "eval"] = "train",
         recalculate_ip: bool = False,
+        class_based_scaling: bool = False,
     ):
         super().__init__()
 
         # ---- Store config ----
-        self.feature_scaler = FeatureScaler(scale_dict)
+        self.feature_scaler = FeatureScaler(
+            scale_dict, class_based_scaling=class_based_scaling
+        )
         self.max_particles = max_particles
         self.train_type = train_type
         self.sin_cos = sin_cos
@@ -118,13 +109,14 @@ class PhysicsDatasetBase(Dataset, ABC):
         self.ctxt_mask_type = ctxt_mask_type
         self.mode = mode
         self.recalculate_ip = recalculate_ip
+        self.class_based_scaling = class_based_scaling
 
         assert self.mode in ("train", "test", "eval"), (
             f"Mode must be 'train', 'test' or 'eval', got '{self.mode}'"
         )
 
         # ---- Variable config ----
-        self._vcfg = self._parse_var_config(var_dict)
+        self._vcfg = VarConfig.from_yaml(var_dict)
         self.ctxt_vars: list[str] = list(self._vcfg.ctxt_vars)
         self.fs_vars = self._vcfg.fs_vars
         self.ctxt_global_vars: list[str] = list(self._vcfg.ctxt_global_vars)
@@ -182,44 +174,6 @@ class PhysicsDatasetBase(Dataset, ABC):
     # ------------------------------------------------------------------
     # Config parsing helpers
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _parse_var_config(var_dict: str) -> VarConfig:
-        """Parse YAML variable config into a :class:`VarConfig`.
-
-        Handles both new ``vars_to_load`` dict and legacy
-        ``{coll}_vars_to_load`` format.
-
-        Example YAML::
-
-            event_vars: [eventNumber, Sim_PV_x, Sim_PV_y, Sim_PV_z]
-            variable_remapping:
-              Sim_PV_x: pv_x
-              Sim_PV_y: pv_y
-              Sim_PV_z: pv_z
-        """
-        with open(var_dict) as f:
-            cfg = yaml.safe_load(f)
-
-        if "vars_to_load" in cfg:
-            vars_to_load: dict[str, list[str]] = cfg["vars_to_load"]
-        else:
-            vars_to_load = {}
-            for key in cfg:
-                if key.endswith("_vars_to_load"):
-                    coll = key.replace("_vars_to_load", "")
-                    vars_to_load[coll] = [
-                        v.replace(f"{coll}_", "", 1) for v in cfg[key]
-                    ]
-
-        return VarConfig(
-            ctxt_vars=cfg["ctxt_vars"],
-            fs_vars=cfg["fs_vars"],
-            ctxt_global_vars=cfg["ctxt_global_vars"],
-            vars_to_load=vars_to_load,
-            event_vars=cfg.get("event_vars", ["eventNumber"]),
-            variable_remapping=cfg.get("variable_remapping", {}),
-        )
 
     @staticmethod
     def _apply_eval_filter(

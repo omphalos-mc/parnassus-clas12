@@ -1,0 +1,30 @@
+eval_path: /path/to/eval_output
+
+recalculate_ip: True
+# Path to scale dict used in the model trainings
+scale_dict: /path/to/scale_dict
+# Path to variable dict specifying which variables to load and evaluate
+var_dict: /path/to/eval_vars.yaml
+
+event_model:
+  ckpt_path: "/path/to/event_model.ckpt"
+  sampler_type: "euler"
+  n_steps: 50
+
+particle_model:
+  ckpt_path: "/path/to/particle_model.ckpt"
+  sampler_type: "dpm"
+  n_steps: 40
+
+# Optional, if not provided impact variables won't be evaluated
+impact_model:
+  ckpt_path: "/path/to/impact_model.ckpt"
+  sampler_type: "euler"
+  n_steps: 40
+
+data:
+  top_folder: /path/to/data/
+  datasets:
+    - name: dataset1
+      path: dataset1.root # Path relative to top_folder
+      n_events: 100_000 # Number of events to evaluate, set to -1 to evaluate all events

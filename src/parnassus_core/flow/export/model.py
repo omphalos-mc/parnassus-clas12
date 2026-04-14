@@ -47,5 +47,5 @@ class ExportModelWrapper(nn.Module):
             ctxt_dict["fs_mask"] = mask[..., 1]
         if self.use_pf_ctxt:
             ctxt_dict["pf_ctxt_data"] = pf_ctxt_data
-        outputs = self.net(fs_data, timestep, ctxt_dict)
+        outputs = self.net(fs_data, timestep, ctxt_dict)[0]
         return outputs

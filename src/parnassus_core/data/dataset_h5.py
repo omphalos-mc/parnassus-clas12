@@ -51,6 +51,8 @@ class StreamingDataset(PhysicsDatasetBase):
     mode : ``"train"`` | ``"test"`` | ``"eval"``
     recalculate_ip : bool
         Recompute impact parameters from vertex positions.
+    class_based_scaling : bool
+        Whether to use class-aware scaling (requires one-hot class features).
     """
 
     def __init__(
@@ -68,6 +70,7 @@ class StreamingDataset(PhysicsDatasetBase):
         entry_start: int = 0,
         mode: Literal["train", "test", "eval"] = "train",
         recalculate_ip: bool = False,
+        class_based_scaling: bool = False,
     ):
         super().__init__(
             var_dict=var_dict,
@@ -80,6 +83,7 @@ class StreamingDataset(PhysicsDatasetBase):
             ctxt_mask_type=ctxt_mask_type,
             mode=mode,
             recalculate_ip=recalculate_ip,
+            class_based_scaling=class_based_scaling,
         )
         self.entry_start = entry_start
 

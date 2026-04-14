@@ -1,0 +1,65 @@
+event_vars:
+  ht:
+    common: true
+  met_x:
+    common: true
+  met_y:
+    common: true
+  npart:
+    common: true
+  pv_x: {}
+  pv_y: {}
+  pv_z: {}
+  actualNumPU: {}
+  trueNumPU: {}
+
+particle_vars:
+  pt:
+    common: true
+  eta:
+    common: true
+  phi:
+    common: true
+  ptrel:
+    common: true
+  class:
+    common: true
+
+  vx:
+    fn: arcsinh_iqr
+    deferred: true
+    charged: true
+  vy:
+    fn: arcsinh_iqr
+    deferred: true
+    charged: true
+  vz_shifted:
+    fn: arcsinh
+    fn_scale: 0.1
+    deferred: true
+    charged: true
+  d0:
+    fn: arcsinh
+    fn_scale: 0.1
+    deferred: true
+    charged: true
+  d0Error:
+    fn: log_median
+    fn_shift: 1.0e-6
+    deferred: true
+    charged: true
+  z0:
+    fn: arcsinh
+    fn_scale: 0.1
+    deferred: true
+    charged: true
+  z0Error:
+    fn: log_median
+    fn_shift: 1.0e-6
+    deferred: true
+    charged: true
+
+settings:
+  class_ids: [0, 1, 2, 3, 4]
+  charged_class_lt: 3
+  recalculate_pv: true

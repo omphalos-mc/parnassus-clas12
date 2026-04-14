@@ -1,0 +1,38 @@
+eval_path: evals
+
+recalculate_ip: True
+scale_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2012/evaluation/configs/var_transform.yaml
+var_dict: /srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2012/evaluation/configs/eval_vars.yaml
+
+event_model:
+  # ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2012/logs/cms2012_event_fm_MSE_Scale_20260221-T165033/ckpts/epoch=010-val_loss=0.86244.ckpt"
+  ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2012/logs/cms2012_event_fm_MSE_Scale2_20260317-T153117/ckpts/epoch=159-val_loss=2941.31934.ckpt"
+  sampler_type: "euler"
+  n_steps: 50
+
+particle_model:
+  # ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2012/logs/cms2012_particle_rcfm_MSEDir_Deep5M_Flex_RMSNorm_ScaleShift_20260218-T111820/ckpts/epoch=054-val_loss=0.75563.ckpt"
+  ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2012/logs/cms2012_particle_rcfm_MSEDir_Deep5M_Flex_RMSNorm_ScaleShift2_20260313-T220241/ckpts/epoch=158-val_loss=0.75022.ckpt"
+  sampler_type: "dpm"
+  n_steps: 40
+
+impact_model:
+  # ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2012/logs/cms2012_impact_fm_MSEDir_FlashSim_RMSNorm_RecalcIP_ScaleShift_20260221-T154825/ckpts/epoch=097-val_loss=0.21050.ckpt"
+  # ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2012/logs/cms2012_impact_rcfm_MSEDir_FlashSim_RMSNorm_RecalcIP_ScaleShift_ChSA_20260305-T163334/ckpts/epoch=096-val_loss=0.14796.ckpt"
+  # ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2012/logs/cms2012_impact_rcfm_MSEDir_FlashSim_RMSNorm_RecalcIP_ScaleShift_SA_20260308-T172710/ckpts/epoch=082-val_loss=0.15307.ckpt"
+  ckpt_path: "/srv01/agrp/dmitrykl/projects/parnassus-core/src/parnassus_core/experiments/cms_2012/logs/cms2012_impact_rcfm_MSEDir_FlashSim_RMSNorm_RecalcIP_ScaleShift3_20260317-T115652/ckpts/epoch=171-val_loss=0.21745.ckpt"
+  sampler_type: "euler"
+  n_steps: 50
+
+data:
+  top_folder: /storage/agrp/dmitrykl/fastsim/f_delphes/data/full_event/output_train_2012/
+  datasets:
+    - name: ttbar
+      path: TTJets_MSDecays_central_TuneZ2star_8TeV-madgraph-tauola/ttbar_test_merged.root
+      n_events: 50000
+    # - name: qcd15to3000
+    #   path: QCD_Pt-15to3000_TuneZ2star_Flat_8TeV_pythia6/qcd_test_merged.root
+    #   n_events: 50000
+    # - name: dy
+    #   path: DYJetsToLL_M-50_TuneZ2Star_8TeV-madgraph-tarball/dy_test_merged.root
+    #   n_events: 50000

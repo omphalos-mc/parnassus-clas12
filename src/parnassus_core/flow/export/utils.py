@@ -2,11 +2,12 @@ from pathlib import Path
 from typing import Iterable, Literal
 import torch
 from torch import Tensor
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import yaml
 
 from parnassus_core.flow.models.wrapper import FlowLightning
 from parnassus_core.flow.export.model import ExportModelWrapper
+from parnassus_core.data.dataset_base import PhysicsDatasetBase
 
 from torch.export import Dim
 from argparse import ArgumentParser
@@ -45,7 +46,7 @@ PARTICLE_TORCH_DYNAMIC_AXES = {
     "ctxt_global_data": {0: BATCH, 1: Dim.STATIC},
 }
 
-DATA_TYPE = type[dict[str, Tensor]]
+DATA_TYPE = dict[str, Tensor]
 
 
 def parse_args():
@@ -75,6 +76,13 @@ def parse_args():
         choices=["onnx", "torch"],
         help="Export format: 'onnx' or 'torch'. Default is 'torch'.",
     )
+    parser.add_argument(
+        "--ds",
+        type=str,
+        default=None,
+        help="Optional path to a dataset file for validation. If not provided,"
+        " a sample batch from the training data will be used for validation.",
+    )
 
     args = parser.parse_args()
     return args
@@ -101,7 +109,10 @@ def export(
     mode: Literal["onnx", "torch"],
     output_path: str | Path,
     sample_batch: DATA_TYPE,
-) -> tuple[ExportModelWrapper, str | Path]:
+) -> tuple[ExportModelWrapper, Path]:
+    if isinstance(output_path, str):
+        output_path = Path(output_path)
+
     match model_type := config["data"]["train_type"]:
         case "event":
             dynamic_axes = (
@@ -164,6 +175,9 @@ def validate(
     mode: Literal["onnx", "torch"],
     device: torch.device = torch.device("cpu"),
 ) -> bool:
+    if isinstance(output_path, str):
+        output_path = Path(output_path)
+
     if isinstance(input_data, dict):
         input_data = [input_data]
     model_wrapper.to(torch.device("cpu"))
@@ -256,7 +270,7 @@ def prepare_data(fs_data, ctxt_dict, mode="particle") -> DATA_TYPE:
 def export_and_validate(
     model: FlowLightning,
     config: dict,
-    dataset: Dataset,
+    dataset: PhysicsDatasetBase,
     batch_size: int,
     mode: Literal["onnx", "torch"],
     output_path: str | Path,

@@ -134,13 +134,27 @@ def build_ctxt_data(
         coll_order.append(coll_name)
         data = collection_data[coll_name]
         mask = collection_masks[coll_name]
+        particle_class = data.get("class")
+        particle_class_indices = None
+        if particle_class is not None and feature_scaler.class_based_scaling:
+            class_ids = list(feature_scaler.class_transforms.keys())
+            particle_class_indices = {
+                class_id: (particle_class == class_id).nonzero(as_tuple=True)
+                for class_id in class_ids
+            }
 
         features: list[Tensor] = []
         for var in var_list:
             base = var_helper.get_base_name(var)
             x = data[base].float().unsqueeze(-1)  # (…, N) → (…, N, 1)
             transformed = apply_variable_transform(
-                var, x, sin_cos, feature_scaler, var_helper
+                var,
+                x,
+                sin_cos,
+                feature_scaler,
+                var_helper,
+                particle_class=particle_class,
+                particle_class_indices=particle_class_indices,
             )
             features.append(transformed)
 
@@ -219,12 +233,26 @@ def build_fs_data(
 
         data = collection_data[coll]
         mask = collection_masks[coll].clone()
+        particle_class = data.get("class")
+        particle_class_indices = None
+        if particle_class is not None and feature_scaler.class_based_scaling:
+            class_ids = list(feature_scaler.class_transforms.keys())
+            particle_class_indices = {
+                class_id: (particle_class == class_id).nonzero(as_tuple=True)
+                for class_id in class_ids
+            }
 
         for var in fs_vars:
             base = var_helper.get_base_name(var)
             x = data[base].float().unsqueeze(-1)  # (…, N) → (…, N, 1)
             transformed = apply_variable_transform(
-                var, x, sin_cos, feature_scaler, var_helper
+                var,
+                x,
+                sin_cos,
+                feature_scaler,
+                var_helper,
+                particle_class=particle_class,
+                particle_class_indices=particle_class_indices,
             )
             features.append(transformed)
 

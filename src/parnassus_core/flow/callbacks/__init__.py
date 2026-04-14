@@ -8,6 +8,8 @@ from .performance import (
     ImpactPerformanceLogger,
 )
 from .prediction_writer import PredictionWriter
+from .dynamo_reset import DynamoResetCallback
+from .cuda_debug import CUDADebugCallback
 
 __all__ = [
     "EMA",
@@ -19,4 +21,6 @@ __all__ = [
     "EventPerformanceLogger",
     "ImpactPerformanceLogger",
     "PredictionWriter",
+    "DynamoResetCallback",
+    "CUDADebugCallback",
 ]

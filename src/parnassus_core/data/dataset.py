@@ -57,6 +57,8 @@ class EagerDataset(PhysicsDatasetBase):
         TTree name inside the ROOT file.
     num_workers : int
         Number of decompression threads for uproot.
+    class_based_scaling : bool
+        Whether to use class-aware scaling (requires one-hot class features).
     """
 
     def __init__(
@@ -76,6 +78,7 @@ class EagerDataset(PhysicsDatasetBase):
         recalculate_ip: bool = False,
         tree_name: str = "evt_tree",
         num_workers: int = 6,
+        class_based_scaling: bool = False,
     ):
         super().__init__(
             var_dict=var_dict,
@@ -88,6 +91,7 @@ class EagerDataset(PhysicsDatasetBase):
             ctxt_mask_type=ctxt_mask_type,
             mode=mode,
             recalculate_ip=recalculate_ip,
+            class_based_scaling=class_based_scaling,
         )
 
         # ---- Open loader ----

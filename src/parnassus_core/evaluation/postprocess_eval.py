@@ -44,7 +44,7 @@ CATEGORY_MASKS = {
     "bkg": lambda x: x == -1,
 }
 
-parser = argparse.ArgumentParser(description="Preprocess full event files")
+parser = argparse.ArgumentParser(description="Postprocess evaluation files")
 parser.add_argument("-i", "--input", type=str, required=False, help="Input file")
 parser.add_argument(
     "-d", "--data", type=str, required=True, help="Input test data file"
@@ -119,6 +119,8 @@ def load_file(filename, entry_start=0, n_events=None, df=False, ip=False):
         tree = file["evt_tree"]
         if n_events is None:
             n_events = tree.num_entries
+        if n_events == -1:
+            n_events = tree.num_entries - entry_start
         varlist_ = PARTICLE_VARS
         if "truth_ind" in tree.keys():
             varlist_ = PARTICLE_VARS + ["ind"]

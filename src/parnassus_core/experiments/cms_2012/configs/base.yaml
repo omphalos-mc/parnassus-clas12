@@ -1,0 +1,66 @@
+seed_everything: 42
+
+data:
+  num_workers: 6
+
+  train_batch_size: 128
+  valid_batch_size: 1000
+
+  max_particles: 400
+  zero_neutral_vtx: false
+  recalculate_ip: true
+  sin_cos: true
+
+  num_train: 5_100_000
+  num_valid: 50_000
+
+  entry_start_train: 0
+  entry_start_valid: 5_100_000
+  entry_start_test: 0
+
+  train_path: /storage/agrp/dmitrykl/fastsim/f_delphes/data/full_event/output_train_2012/train_merged_equal.h5
+  valid_path: /storage/agrp/dmitrykl/fastsim/f_delphes/data/full_event/output_train_2012/train_merged_equal.h5
+  test_path: /storage/agrp/dmitrykl/fastsim/f_delphes/data/full_event/output_train_2012/train_merged_equal.h5
+
+# Training stuff here
+trainer:
+  gradient_clip_val: 1.0
+  max_epochs: 200
+  accelerator: gpu
+  devices: 1
+  # precision: bf16-mixed
+  default_root_dir: logs
+  enable_progress_bar: True
+
+  # Specify loggers here
+  logger:
+    class_path: lightning.pytorch.loggers.CometLogger
+    init_args:
+      project: parnassus_cms_2012
+
+  callbacks:
+    - class_path: parnassus_core.flow.callbacks.Checkpoint
+      init_args:
+        monitor: val/loss
+        save_last: true
+        every_n_train_steps: 1000
+    - class_path: lightning.pytorch.callbacks.ModelSummary
+      init_args:
+        max_depth: 2
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+    - class_path: lightning.pytorch.callbacks.TQDMProgressBar
+      init_args:
+        refresh_rate: 50
+    - class_path: parnassus_core.flow.callbacks.PredictionWriter
+
+model:
+  optimizer: Lion
+  optimizer_kwargs:
+    lr: 3e-5
+    weight_decay: 0.01
+
+  lrs_config:
+    skip_scheduler: false
+    lr_scheduler_type: cosine
+    lr_scheduler_kwargs:
+      gamma: 0.5

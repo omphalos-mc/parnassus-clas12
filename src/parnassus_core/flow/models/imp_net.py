@@ -4,21 +4,25 @@ import torch
 import torch.nn as nn
 from torch.nn.attention.flex_attention import create_block_mask
 
-from parnassus_core.flow.modules import (
-    NamedNetwork,
+from parnassus_core.flow.modules.attention import create_padding_mask_from_kv
+from parnassus_core.flow.modules import NamedNetwork, DiTEncoder
+from parnassus_core.flow.modules.embedding import (
+    GlobalContextEmbedding,
+    TimestepEmbedder,
 )
 
 
 class ImpactNetwork(nn.Module):
     def __init__(
         self,
-        time_embedding: nn.Module,
+        time_embedding: TimestepEmbedder,
         fs_init_net: nn.Module,
         ctxt_networks: nn.ModuleList,
-        global_embedding: nn.Module,
+        global_embedding: GlobalContextEmbedding,
         fs_out_net: nn.Module,
         fourier_embedding: nn.Module | None = None,
-        encoder: nn.Module | None = None,
+        encoder: DiTEncoder | None = None,
+        sa_encoder: DiTEncoder | None = None,
         resnet: nn.Module | None = None,
         concat_pf_ctxt: bool = False,
     ):
@@ -31,6 +35,7 @@ class ImpactNetwork(nn.Module):
         self.global_embedding = global_embedding
         self.fs_out_net = fs_out_net
         self.encoder = encoder
+        self.sa_encoder = sa_encoder
         self.resnet = resnet
         self.fourier_embedding = fourier_embedding
         self.concat_pf_ctxt = concat_pf_ctxt
@@ -47,17 +52,19 @@ class ImpactNetwork(nn.Module):
             nn.Linear(global_embd_dim, hidden_dim * 2, bias=True),
         )
 
-    def create_padding_mask(self, pads_kv):
-        def padding(b, h, q_idx, kv_idx):
-            return pads_kv[b, kv_idx]
-
-        return padding
+        if self.sa_encoder is not None:
+            assert self.sa_encoder.bidirectional is False, (
+                "Self-attention encoder must be unidirectional"
+            )
 
     def change_backend(self, attn_type: str):
-        if self.encoder is not None:
-            self.attn_type = self.encoder.set_backend(attn_type)
+        if self.encoder is not None or self.sa_encoder is not None:
+            if self.encoder is not None:
+                self.attn_type = self.encoder.set_backend(attn_type)
+            if self.sa_encoder is not None:
+                self.attn_type = self.sa_encoder.set_backend(attn_type)
             if "flash" in self.attn_type:
-                self.context_manager = torch.amp.autocast(
+                self.context_manager = torch.amp.autocast(  # pyright: ignore[reportPrivateImportUsage]
                     enabled=True, dtype=torch.bfloat16, device_type="cuda"
                 )
             else:
@@ -72,7 +79,7 @@ class ImpactNetwork(nn.Module):
     ):
         ctxt_embd_dict: dict[str, torch.Tensor] = {}
         ctxt_net: NamedNetwork
-        for ctxt_net in self.ctxt_networks:
+        for ctxt_net in self.ctxt_networks:  # pyright: ignore[reportAssignmentType]
             ctxt_embd_dict[ctxt_net.input_name + "_embd"] = ctxt_net(ctxt_dict)
         ctxt_embd_dict["time_embd"] = self.time_embedding(timestep)
 
@@ -101,28 +108,29 @@ class ImpactNetwork(nn.Module):
             ctxt_embd = ctxt_embd_dict["ctxt_embd"]
             ctxt_embd = ctxt_embd * ctxt_mask.unsqueeze(-1)
 
+        if self.attn_type == "flex":
+            B, S = fs_mask.shape
+            attn_mask_fs = create_block_mask(
+                create_padding_mask_from_kv(fs_mask),
+                B=B,
+                H=None,
+                Q_LEN=S,
+                KV_LEN=S,
+                _compile=True,
+            )
+            attn_mask_ctxt = create_block_mask(
+                create_padding_mask_from_kv(ctxt_mask),
+                B=B,
+                H=None,
+                Q_LEN=S,
+                KV_LEN=S,
+                _compile=True,
+            )
+        else:
+            attn_mask_fs = fs_mask
+            attn_mask_ctxt = ctxt_mask
+
         if self.encoder is not None:
-            if self.attn_type == "flex":
-                B, S = fs_mask.shape
-                attn_mask_fs = create_block_mask(
-                    self.create_padding_mask(fs_mask),
-                    B=B,
-                    H=None,
-                    Q_LEN=S,
-                    KV_LEN=S,
-                    _compile=True,
-                )
-                attn_mask_ctxt = create_block_mask(
-                    self.create_padding_mask(ctxt_mask),
-                    B=B,
-                    H=None,
-                    Q_LEN=S,
-                    KV_LEN=S,
-                    _compile=True,
-                )
-            else:
-                attn_mask_fs = fs_mask
-                attn_mask_ctxt = ctxt_mask
             with self.context_manager:
                 fs_embd, _, _ = self.encoder(
                     seq_a=fs_embd,
@@ -131,9 +139,21 @@ class ImpactNetwork(nn.Module):
                     mask_a=attn_mask_fs,
                     mask_b=attn_mask_ctxt,
                 )
+        if self.sa_encoder is not None:
+            with self.context_manager:
+                fs_embd, _, _ = self.sa_encoder(
+                    seq_a=fs_embd,
+                    seq_b=fs_embd,
+                    ctxt=global_embd,
+                    mask_a=attn_mask_fs,
+                    mask_b=attn_mask_fs,
+                )
+
         if self.concat_pf_ctxt and "pf_ctxt_embd" in ctxt_embd_dict:
             fs_embd = torch.cat([fs_embd, ctxt_embd_dict["pf_ctxt_embd"]], dim=-1)
+
         if self.resnet is not None:
             fs_embd = self.resnet(fs_embd.to(global_embd.dtype))
+
         fs_out = self.fs_out_net(fs_embd, ctxt=global_embd)
         return fs_out, None

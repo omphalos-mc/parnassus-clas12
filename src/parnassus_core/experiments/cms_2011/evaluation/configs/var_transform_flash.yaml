@@ -120,7 +120,8 @@ d0Error:
   std: 1
   min: 0.000
   max: 33.009
-  fn: log1p
+  fn: log
+  fn_shift: 0.001
 
 z0:
   mean: 0

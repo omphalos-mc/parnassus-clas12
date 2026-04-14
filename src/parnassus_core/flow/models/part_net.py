@@ -4,9 +4,12 @@ import torch
 import torch.nn as nn
 from torch.nn.attention.flex_attention import create_block_mask
 
+from parnassus_core.flow.modules.attention import create_padding_mask_from_kv
+
 from parnassus_core.flow.modules import (
     NamedNetwork,
 )
+from parnassus_core.flow.modules import DiTEncoder
 
 
 class ParticleNetwork(nn.Module):
@@ -16,7 +19,7 @@ class ParticleNetwork(nn.Module):
         fs_init_net: nn.Module,
         ctxt_networks: nn.ModuleList,
         global_embedding: nn.Module,
-        encoder: nn.Module,
+        encoder: DiTEncoder,
         fs_out_net: nn.Module,
         inter_out_net: nn.Module | None = None,
     ):
@@ -35,20 +38,10 @@ class ParticleNetwork(nn.Module):
         self.context_manager = nullcontext()
         self.attn_type = self.change_backend(encoder.attn_type)
 
-    def create_padding_mask(self, pads_kv):
-        S = pads_kv.size(1)
-
-        def padding(b, h, q_idx, kv_idx):
-            is_valid_idx = kv_idx < S
-            safe_kv_idx = torch.clamp(kv_idx, max=S - 1)
-            return is_valid_idx & pads_kv[b, safe_kv_idx]
-
-        return padding
-
     def change_backend(self, attn_type: str):
         self.attn_type = self.encoder.set_backend(attn_type)
         if "flash" in self.attn_type:
-            self.context_manager = torch.amp.autocast(
+            self.context_manager = torch.amp.autocast(  # pyright: ignore[reportPrivateImportUsage]
                 enabled=True, dtype=torch.bfloat16, device_type="cuda"
             )
         else:
@@ -66,7 +59,7 @@ class ParticleNetwork(nn.Module):
 
         ctxt_embd_dict = {}
         ctxt_net: NamedNetwork
-        for ctxt_net in self.ctxt_networks:
+        for ctxt_net in self.ctxt_networks:  # pyright: ignore[reportAssignmentType]
             ctxt_embd_dict[ctxt_net.input_name + "_embd"] = ctxt_net(ctxt_dict)
 
         ctxt_embd_dict["time_embd"] = self.time_embedding(timestep)
@@ -81,7 +74,7 @@ class ParticleNetwork(nn.Module):
         if self.attn_type == "flex":
             B, S = fs_mask.size()
             attn_mask_ctxt = create_block_mask(
-                self.create_padding_mask(ctxt_mask),
+                create_padding_mask_from_kv(ctxt_mask),
                 B=B,
                 H=None,
                 Q_LEN=S,
@@ -89,7 +82,7 @@ class ParticleNetwork(nn.Module):
                 _compile=True,
             )
             attn_mask_fs = create_block_mask(
-                self.create_padding_mask(fs_mask),
+                create_padding_mask_from_kv(fs_mask),
                 B=B,
                 H=None,
                 Q_LEN=S,

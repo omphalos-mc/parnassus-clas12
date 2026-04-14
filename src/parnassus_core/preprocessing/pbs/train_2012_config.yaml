@@ -16,9 +16,10 @@ log_dir: ./pbs_logs
 # Group names become subdirectories under target_top_dir
 # Supports nested groups like "group1/subgroup2"
 files:
-  DYJetsToLL_M-50_TuneZ2Star_8TeV-madgraph-tarball: !include train_2012/dy_events.yaml
-  QCD_Pt-15to3000_TuneZ2star_Flat_8TeV_pythia6: !include train_2012/qcd_events.yaml
-  TTJets_MSDecays_central_TuneZ2star_8TeV-madgraph-tauola: !include train_2012/ttbar_events.yaml
+  # DYJetsToLL_M-50_TuneZ2Star_8TeV-madgraph-tarball: !include train_2012/dy_events.yaml
+  # QCD_Pt-15to3000_TuneZ2star_Flat_8TeV_pythia6: !include train_2012/qcd_events.yaml
+  # TTJets_MSDecays_central_TuneZ2star_8TeV-madgraph-tauola: !include train_2012/ttbar_events.yaml
+  # QCD_Pt-15to3000_TuneZ2star_Flat_8TeV_pythia6_noPU: !include train_2012/qcd_noPU_events.yaml
 # Processing parameters applied to all cms_to_root jobs
 processing_params:
   pt_cut: 0.25 # pT cut for truth particles (GeV)

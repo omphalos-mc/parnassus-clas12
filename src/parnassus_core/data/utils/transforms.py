@@ -24,6 +24,9 @@ def apply_variable_transform(
     sin_cos: bool,
     feature_scaler: FeatureScaler,
     var_helper: VariableHelper | None = None,
+    particle_class: Tensor | None = None,
+    particle_class_masks: dict[int, Tensor] | None = None,
+    particle_class_indices: dict[int, tuple[Tensor, ...]] | None = None,
 ) -> Tensor:
     """Apply appropriate transform to a variable based on its name.
 
@@ -88,7 +91,13 @@ def apply_variable_transform(
     if var_helper is None:
         raise ValueError(f"var_helper is required to scale '{var_name}'")
     scaler_key = var_helper.scaler_key(var_name)
-    return feature_scaler[scaler_key].transform(data).float()
+    return feature_scaler.transform(
+        scaler_key,
+        data,
+        particle_class=particle_class,
+        particle_class_masks=particle_class_masks,
+        particle_class_indices=particle_class_indices,
+    ).float()
 
 
 def apply_batch_transform(
@@ -97,6 +106,9 @@ def apply_batch_transform(
     sin_cos: bool,
     feature_scaler: FeatureScaler,
     var_helper: VariableHelper | None = None,
+    particle_class: Tensor | None = None,
+    particle_class_masks: dict[int, Tensor] | None = None,
+    particle_class_indices: dict[int, tuple[Tensor, ...]] | None = None,
 ) -> list[Tensor]:
     """Apply transforms to multiple variables and return as list.
 
@@ -128,7 +140,14 @@ def apply_batch_transform(
         data = data_dict[var_name]
         transformed.append(
             apply_variable_transform(
-                var_name, data, sin_cos, feature_scaler, var_helper
+                var_name,
+                data,
+                sin_cos,
+                feature_scaler,
+                var_helper,
+                particle_class=particle_class,
+                particle_class_masks=particle_class_masks,
+                particle_class_indices=particle_class_indices,
             )
         )
     return transformed

@@ -64,10 +64,10 @@ By `Evaluation` we mean the full-chain evaluation of the models, which includes:
 2. Running the particle-level model on the event-level outputs to generate particle-level quantities.
 3. Running the impact-level model on the particle-level outputs to generate impact parameters.
 
-To run the full evaluation chain, you can use the `eval.py` script located in the `src/parnassus_core/experiments/cms_2011/evaluation/` directory.
+To run the full evaluation chain, you can use the `eval.py` script located in the `src/parnassus_core/evaluation/` directory.
 
 ```bash
-python eval.py -c config.yaml
+python -m parnassus_core.evaluation.eval -c config.yaml
 ```
 
 This will run the evaluation on the test datasets specified in the `config.yaml` file and save the results to the `evals/` directory.
@@ -77,10 +77,10 @@ To launch this kind of evaluation you need to have `event` and `particle` models
 
 ### Evaluation Postprocessing
 
-To postprocess the evaluation results, you can run the following command from the `src/parnassus_core/experiments/cms_2011/evaluation/` directory:
+To postprocess the evaluation results, you can run the following command from the `src/parnassus_core/evaluation/` directory:
 
 ```bash
-python postprocess_eval.py \
+python -m parnassus_core.evaluation.postprocess_eval \
     -i <path_to_eval_root_file> \
     -d <path_to_data_file> \
     -o <output_filename> \
@@ -105,7 +105,7 @@ You can also use the following optional flags:
 To export the trained models to **ONNX** or **Torch** format, you can run the following command from the `src/parnassus_core/experiments/cms_2011/` directory:
 
 ```bash
-python export.py \
+python -m parnassus_core.flow.export \
     --ckpt <path_to_ckpt> \
     --config <path_to_config> \
     --output <output_filename> \

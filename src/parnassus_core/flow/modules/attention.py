@@ -35,6 +35,23 @@ FLASH_ATTN_TYPES = [
 ]
 
 
+def create_padding_mask_from_kv(pads_kv: Tensor, safe: bool = True):
+    if safe:
+        S = pads_kv.size(1)
+
+        def padding_safe(b, h, q_idx, kv_idx):
+            is_valid_idx = kv_idx < S
+            safe_kv_idx = torch.clamp(kv_idx, max=S - 1)
+            return is_valid_idx & pads_kv[b, safe_kv_idx]
+
+        return padding_safe
+
+    def padding(b, h, q_idx, kv_idx):
+        return pads_kv[b, kv_idx]
+
+    return padding
+
+
 def merge_masks(
     q_mask: BoolTensor | None,
     kv_mask: BoolTensor | None,
