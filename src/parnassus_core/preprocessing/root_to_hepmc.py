@@ -57,7 +57,7 @@ def getEventHepMC(event_data):
         vtx = vtx_dict.get(hash((vx, vy, vz)), None)
         if vtx is None:
             vtx = getVertexHepMC(vx, vy, vz)
-            particle_in = getParticleHepMC(0.0001, 0, 0, 0, 0)
+            particle_in = getParticleHepMC(0.0001, 0, 0, 0, 0, status=0)
             event.add_particle(particle_in)
             vtx.add_particle_in(particle_in)
             vtx_dict[hash((vx, vy, vz))] = vtx
