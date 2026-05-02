@@ -2,13 +2,13 @@ import argparse
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast, final
+from typing import Generator, cast, final
 
 import h5py
 import hdf5plugin
 import numpy as np
 import uproot
-from numpy.lib.recfunctions import unstructured_to_structured
+
 from tqdm import tqdm
 
 ## Example ROOT file structure:
@@ -164,6 +164,9 @@ class TreeMap:
                 # Scalar branch: global event variable
                 # Skip count variables
                 if key.startswith("n") and len(key) > 1 and "_" not in key:
+                    continue
+                # Skip PV variables for now...
+                if "PV" in key:
                     continue
                 global_vars.append(key)
 
@@ -321,49 +324,31 @@ class PrepareSamples:
         tree_name = self.data_map.tree_name
         tree_data = {}
 
-        # For multiple files, load all events from all files
+        branches = list(self.data_map.global_vars)
+        for constituent_name, var_names in self.data_map.constituents.items():
+            branches.extend(f"{constituent_name}_{var_name}" for var_name in var_names)
+
+        # For multiple files, use one concatenate call to avoid repeated
+        # np.concatenate copies inside a per-file loop.
         if len(filenames) > 1:
             print(f"Loading all events from {len(filenames)} files...")
-            pbar = tqdm(filenames)
-            for file_idx, filename in enumerate(pbar):
-                filename: Path
-                pbar.set_description(f"File: {filename.name.strip('_poet.root')}")
-                with uproot.open(filename) as rootfile:  # type: ignore
-                    tree = rootfile[tree_name]
-                    arrays = tree.arrays(library="np")
+            file_specs = [f"{filename}:{tree_name}" for filename in filenames]
+            arrays = uproot.concatenate(file_specs, expressions=branches, library="np")
 
-                    # Initialize or concatenate global variables
-                    for global_var in self.data_map.global_vars:
-                        if file_idx == 0:
-                            tree_data[global_var] = arrays[global_var]
-                        else:
-                            tree_data[global_var] = np.concatenate(
-                                (tree_data[global_var], arrays[global_var])
-                            )
+            for global_var in self.data_map.global_vars:
+                tree_data[global_var] = arrays[global_var]
 
-                    # Initialize or concatenate constituent arrays
-                    for (
-                        constituent_name,
-                        var_names,
-                    ) in self.data_map.constituents.items():
-                        if file_idx == 0:
-                            tree_data[constituent_name] = {
-                                var_name: arrays[f"{constituent_name}_{var_name}"]
-                                for var_name in var_names
-                            }
-                        else:
-                            for var_name in var_names:
-                                tree_data[constituent_name][var_name] = np.concatenate(
-                                    (
-                                        tree_data[constituent_name][var_name],
-                                        arrays[f"{constituent_name}_{var_name}"],
-                                    )
-                                )
+            for constituent_name, var_names in self.data_map.constituents.items():
+                tree_data[constituent_name] = {
+                    var_name: arrays[f"{constituent_name}_{var_name}"]
+                    for var_name in var_names
+                }
         else:
             # For a single file, use start/end indices
             with uproot.open(filenames[0]) as rootfile:  # type: ignore
                 tree = rootfile[tree_name]
                 arrays = tree.arrays(
+                    expressions=branches,
                     entry_start=start,
                     entry_stop=end,
                     library="np",
@@ -383,67 +368,86 @@ class PrepareSamples:
         return tree_data
 
     def _convert_events(self, events):
-        event_dtypes = []
-        events_output = []
-        for key in events.keys():
-            event_dtypes.append((key, "f4"))
-            events_output.append(events[key].astype(np.float32))
-        return unstructured_to_structured(
-            np.stack(events_output, axis=-1), dtype=np.dtype(event_dtypes)
-        )
+        event_dtype = np.dtype([(key, "f4") for key in events])
+        n_events = len(next(iter(events.values()))) if events else 0
+        out = np.empty(n_events, dtype=event_dtype)
+        for key, values in events.items():
+            out[key] = np.asarray(values, dtype=np.float32)
+        return out
 
     def _convert_constituents(self, arrays, max_size, start_index=0, end_index=None):
-        dtypes = []
-        output = []
-        original_length = []
-        # sort by pt if available, otherwise by energy
-        if "pt" in arrays:
-            sort_idxs = [
-                np.argsort(-arrays["pt"][i])
-                for i in range(
-                    start_index, end_index if end_index else arrays["pt"].shape[0]
-                )
-            ]
-        else:
-            sort_idxs = [
-                np.argsort(-arrays["e"][i])
-                for i in range(
-                    start_index, end_index if end_index else arrays["e"].shape[0]
-                )
-            ]
-        for key, arr in arrays.items():
-            # We pad with NaNs to indicate invalid entries
-            # shape: (n_events, max_size)
-            # Also we sort the entries by pt/energy
-            arr_subset = arr[start_index:end_index] if end_index else arr[start_index:]
-            n_events = len(arr_subset)
+        slice_obj = (
+            slice(start_index, end_index)
+            if end_index is not None
+            else slice(start_index, None)
+        )
 
-            # Pre-allocate output array
-            pad_value = 0 if key in INT_VARIABLES | SHORT_VARIABLES else np.nan
-            padded = np.full((n_events, max_size), pad_value, dtype=np.float32)
+        # Sort by pt when available, otherwise by energy.
+        sort_source_name = "pt" if "pt" in arrays else "e"
+        sort_source = arrays[sort_source_name][slice_obj]
+        n_events = len(sort_source)
 
-            # Fill with sorted data
-            for i, (event_arr, sort_idx) in enumerate(zip(arr_subset, sort_idxs)):
-                if key == "pt":
-                    original_length.append(len(event_arr))
-                if event_arr.size > 0:
-                    sorted_arr = event_arr[sort_idx][:max_size]
-                    padded[i, : len(sorted_arr)] = sorted_arr.astype(np.float32)
-            output.append(padded)
-            dtypes.append(
-                (
-                    key,
-                    "f4"
-                    if key not in INT_VARIABLES | SHORT_VARIABLES
-                    else ("i4" if key in INT_VARIABLES else "i2"),
+        # Use partial sort for long events: pick top-k with argpartition,
+        # then fully sort only those k entries.
+        sort_idxs = []
+        for i in range(n_events):
+            event_source = sort_source[i]
+            event_len = len(event_source)
+            if event_len <= max_size:
+                sort_idxs.append(np.argsort(-event_source))
+            else:
+                topk = np.argpartition(-event_source, max_size - 1)[:max_size]
+                topk = topk[np.argsort(-event_source[topk])]
+                sort_idxs.append(topk)
+
+        original_length = np.fromiter(
+            (len(ev) for ev in sort_source), dtype=np.int32, count=n_events
+        )
+        clipped_length = np.minimum(original_length, max_size)
+        arr_subsets = {key: arr[slice_obj] for key, arr in arrays.items()}
+
+        field_dtypes = []
+        field_np_dtypes = {}
+        for key in arrays.keys():
+            if key in INT_VARIABLES:
+                field_dtypes.append((key, "i4"))
+                field_np_dtypes[key] = np.int32
+            elif key in SHORT_VARIABLES:
+                field_dtypes.append((key, "i2"))
+                field_np_dtypes[key] = np.int16
+            else:
+                field_dtypes.append((key, "f4"))
+                field_np_dtypes[key] = np.float32
+        field_dtypes.append(("valid", "bool"))
+
+        out = np.empty((n_events, max_size), dtype=np.dtype(field_dtypes))
+
+        # Initialize pads in-place in the structured output.
+        for key in arrays.keys():
+            if key in INT_VARIABLES or key in SHORT_VARIABLES:
+                out[key].fill(0)
+            else:
+                out[key].fill(np.nan)
+        out["valid"].fill(False)
+
+        # Fill one event at a time to avoid per-field intermediate arrays.
+        for i in range(n_events):
+            n_keep = clipped_length[i]
+            if n_keep <= 0:
+                continue
+            take_idx = sort_idxs[i][:n_keep]
+
+            for key, arr_subset in arr_subsets.items():
+                event_arr = arr_subset[i]
+                if event_arr.size == 0:
+                    continue
+                out[key][i, :n_keep] = event_arr[take_idx].astype(
+                    field_np_dtypes[key], copy=False
                 )
-            )
-        # create valid mask
-        output.append(np.isfinite(output[0]) * 1)
-        dtypes.append(("valid", "bool"))
-        return unstructured_to_structured(
-            np.stack(output, axis=-1), dtype=np.dtype(dtypes)
-        ), np.array(original_length)
+
+            out["valid"][i, :n_keep] = True
+
+        return out, original_length
 
     def _compute_event_features(self, arrays: np.ndarray) -> dict[str, np.ndarray]:
         data_dict: dict[str, np.ndarray] = {}
@@ -457,102 +461,186 @@ class PrepareSamples:
             data_dict["npart"] = np.sum(arrays["valid"], axis=1).astype(np.int32)
         return data_dict
 
+    def _iter_event_chunks(
+        self,
+    ) -> "Generator[dict[str, np.ndarray | dict[str, np.ndarray]], None, None]":
+        """Yield event chunks directly from ROOT files.
+
+        This avoids materializing all events in memory before conversion.
+        """
+        tree_name = self.data_map.tree_name
+
+        branches = list(self.data_map.global_vars)
+        for constituent_name, var_names in self.data_map.constituents.items():
+            branches.extend(f"{constituent_name}_{var_name}" for var_name in var_names)
+
+        file_specs = [f"{filename}:{tree_name}" for filename in self.input_files]
+        for arrays in uproot.iterate(
+            file_specs,
+            expressions=branches,
+            library="np",
+            step_size=self.batch_size,
+        ):
+            tree_data: dict[str, np.ndarray | dict[str, np.ndarray]] = {}
+            for global_var in self.data_map.global_vars:
+                tree_data[global_var] = arrays[global_var]  # type: ignore
+            for constituent_name, var_names in self.data_map.constituents.items():
+                tree_data[constituent_name] = {
+                    var_name: arrays[f"{constituent_name}_{var_name}"]  # type: ignore
+                    for var_name in var_names
+                }
+            yield tree_data
+
     def run(self):
         """Run the preprocessing to convert ROOT to HDF5."""
-        # load data
-        print("Loading data...")
-        tree_data = self._load_events(self.input_files, 0, self.n_events)
         print("Converting and writing data...")
-        batch_indices = [
-            (i, min(i + self.batch_size, self.n_events))
-            for i in range(0, self.n_events, self.batch_size)
-        ]
-        create_file = True
         displayed_writing_output = False
         pbar = tqdm(total=self.n_events)
-        for start, end in batch_indices:
-            h5_tree_data = {}
-            event_data_dict = {
-                k: tree_data[k][start:end] for k in self.data_map.global_vars
-            }
-            # convert constituents
-            for constituent_name in self.data_map.constituents:
-                h5_tree_data[constituent_name], original_length = (
-                    self._convert_constituents(
-                        tree_data[constituent_name],
-                        self.max_particles_dict[constituent_name],
-                        start_index=start,
-                        end_index=end,
-                    )
-                )
-                event_data_dict[f"{constituent_name}_npart_orig"] = (
-                    original_length.astype(np.int32)
-                )
-                for key, value in self._compute_event_features(
-                    h5_tree_data[constituent_name]
-                ).items():
-                    event_data_dict[f"{constituent_name}_{key}"] = value
-            # convert global event variables
-            h5_tree_data["events"] = self._convert_events(event_data_dict)
-            pbar.update(end - start)
+        processed_events = 0
+        write_offset = 0
+        preallocate_output = not self.cut_events
 
-            if self.cut_events:
-                valid_mask = np.ones(end - start, dtype=bool)
-                for consituent_name in self.data_map.constituents:
-                    valid_mask &= (
-                        h5_tree_data["events"][f"{consituent_name}_npart_orig"]
-                        < self.max_particles_dict[consituent_name]
+        datasets: dict[str, h5py.Dataset] = {}
+        with h5py.File(self.output, "w") as out_file:
+            for tree_data in self._iter_event_chunks():
+                if processed_events >= self.n_events:
+                    break
+
+                if self.data_map.global_vars:
+                    chunk_size = len(
+                        cast(np.ndarray, tree_data[self.data_map.global_vars[0]])
                     )
-                    if consituent_name in {"pflow", "truth"}:
-                        valid_mask &= (
-                            h5_tree_data["events"][f"{consituent_name}_npart_orig"] > 0
-                        )
-                h5_tree_data["events"] = h5_tree_data["events"][valid_mask]
+                else:
+                    first_constituent = next(iter(self.data_map.constituents))
+                    first_var = self.data_map.constituents[first_constituent][0]
+                    chunk_size = len(
+                        cast(dict[str, np.ndarray], tree_data[first_constituent])[
+                            first_var
+                        ]
+                    )
+
+                keep = min(chunk_size, self.n_events - processed_events)
+                if keep <= 0:
+                    break
+
+                h5_tree_data = {}
+                event_data_dict = {
+                    k: cast(np.ndarray, tree_data[k])[:keep]
+                    for k in self.data_map.global_vars
+                }
+
+                # convert constituents
                 for constituent_name in self.data_map.constituents:
-                    h5_tree_data[constituent_name] = h5_tree_data[constituent_name][
-                        valid_mask
-                    ]
-                self.removed_events += np.sum(~valid_mask)
+                    h5_tree_data[constituent_name], original_length = (
+                        self._convert_constituents(
+                            cast(dict[str, np.ndarray], tree_data[constituent_name]),
+                            self.max_particles_dict[constituent_name],
+                            start_index=0,
+                            end_index=keep,
+                        )
+                    )
+                    event_data_dict[f"{constituent_name}_npart_orig"] = (
+                        original_length.astype(np.int32)
+                    )
+                    for key, value in self._compute_event_features(
+                        h5_tree_data[constituent_name]
+                    ).items():
+                        event_data_dict[f"{constituent_name}_{key}"] = value
+                # convert global event variables
+                h5_tree_data["events"] = self._convert_events(event_data_dict)
+                pbar.update(keep)
+                processed_events += keep
 
-            if self.shuffle:
-                idx = np.arange(h5_tree_data["events"].shape[0])
-                self.rng.shuffle(idx)
-                for key in h5_tree_data:
-                    h5_tree_data[key] = h5_tree_data[key][idx]
+                if self.cut_events:
+                    valid_mask = np.ones(keep, dtype=bool)
+                    for consituent_name in self.data_map.constituents:
+                        valid_mask &= (
+                            h5_tree_data["events"][f"{consituent_name}_npart_orig"]
+                            < self.max_particles_dict[consituent_name]
+                        )
+                        if consituent_name in {"pflow", "truth"}:
+                            valid_mask &= (
+                                h5_tree_data["events"][f"{consituent_name}_npart_orig"]
+                                > 0
+                            )
+                    h5_tree_data["events"] = h5_tree_data["events"][valid_mask]
+                    for constituent_name in self.data_map.constituents:
+                        h5_tree_data[constituent_name] = h5_tree_data[constituent_name][
+                            valid_mask
+                        ]
+                    self.removed_events += np.sum(~valid_mask)
 
-            if create_file:
-                create_file = False
-                # write to file by creating dataset
-                pbar.write(f"Creating output file: {self.output}")
-                displayed_writing_output = True
-                with h5py.File(self.output, "w") as out_file:
+                if self.shuffle:
+                    idx = np.arange(h5_tree_data["events"].shape[0])
+                    self.rng.shuffle(idx)
+                    for key in h5_tree_data:
+                        h5_tree_data[key] = h5_tree_data[key][idx]
+
+                if not datasets:
+                    pbar.write(f"Creating output file: {self.output}")
+                    displayed_writing_output = True
                     for key, value in h5_tree_data.items():
                         if key == "events":
                             chunk_shape = (1024,)
-                            max_shape = (None,)
+                            if preallocate_output:
+                                shape = (self.n_events,)
+                                max_shape = (self.n_events,)
+                            else:
+                                shape = value.shape
+                                max_shape = (None,)
                         else:
                             width = self.max_particles_dict[key]
                             # For constituents, we set chunk shape to (64, width) to optimize for reading batches of events
                             chunk_shape = (64, width)
-                            max_shape = (None, width)
-                        out_file.create_dataset(
-                            key,
-                            data=value,
-                            chunks=chunk_shape,
-                            maxshape=max_shape,
-                            compression=hdf5plugin.LZ4(),
-                        )
+                            if preallocate_output:
+                                shape = (self.n_events, width)
+                                max_shape = (self.n_events, width)
+                            else:
+                                shape = value.shape
+                                max_shape = (None, width)
 
-            else:
-                # appending to existing dataset
-                if displayed_writing_output:
-                    pbar.write(f"Writing to output file: {self.output}")
-                with h5py.File(self.output, "a") as out_file:
-                    for key, value in h5_tree_data.items():
-                        dataset = cast(h5py.Dataset, out_file[key])
-                        dataset.resize((dataset.shape[0] + value.shape[0]), axis=0)
-                        dataset[-value.shape[0] :] = value
-                displayed_writing_output = False
+                        if preallocate_output:
+                            datasets[key] = out_file.create_dataset(
+                                key,
+                                shape=shape,
+                                dtype=value.dtype,
+                                chunks=chunk_shape,
+                                maxshape=max_shape,
+                                compression=hdf5plugin.LZ4(),  # pyright: ignore[reportPrivateImportUsage]
+                            )
+                        else:
+                            datasets[key] = out_file.create_dataset(
+                                key,
+                                data=value,
+                                chunks=chunk_shape,
+                                maxshape=max_shape,
+                                compression=hdf5plugin.LZ4(),  # pyright: ignore[reportPrivateImportUsage]
+                            )
+
+                    if preallocate_output:
+                        batch_written = h5_tree_data["events"].shape[0]
+                        for key, value in h5_tree_data.items():
+                            datasets[key][
+                                write_offset : write_offset + batch_written
+                            ] = value
+                        write_offset += batch_written
+                else:
+                    # appending to existing dataset
+                    if displayed_writing_output:
+                        pbar.write(f"Writing to output file: {self.output}")
+                    if preallocate_output:
+                        batch_written = h5_tree_data["events"].shape[0]
+                        for key, value in h5_tree_data.items():
+                            datasets[key][
+                                write_offset : write_offset + batch_written
+                            ] = value
+                        write_offset += batch_written
+                    else:
+                        for key, value in h5_tree_data.items():
+                            dataset = datasets[key]
+                            dataset.resize((dataset.shape[0] + value.shape[0]), axis=0)
+                            dataset[-value.shape[0] :] = value
+                    displayed_writing_output = False
         pbar.close()
 
         print(
