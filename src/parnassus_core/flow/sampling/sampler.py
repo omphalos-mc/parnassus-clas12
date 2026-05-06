@@ -284,6 +284,86 @@ class EulerSampler(Sampler):
         return fastsim
 
 
+class NonSingularSampler(Sampler):
+    # From http://arxiv.org/abs/2410.02217 paper
+    def __init__(
+        self,
+        n_steps,
+        use_edm_schedule=False,
+        heavy_tail=False,
+        zero_init_padded=True,
+        edm_config: dict | None = None,
+        random_seed=None,
+        reverse_time=False,
+        g_scale=0.0,
+        n=1.0,
+        m=0.0,
+    ):
+        super().__init__(
+            n_steps=n_steps,
+            use_edm_schedule=use_edm_schedule,
+            heavy_tail=heavy_tail,
+            zero_init_padded=zero_init_padded,
+            edm_config=edm_config,
+            random_seed=random_seed,
+            reverse_time=reverse_time,
+        )
+        self.g_scale = g_scale
+        self.n = n
+        self.m = m
+        print(f"Using Non-Singular sampler with g_scale={g_scale}, n={n}, m={m}")
+
+    @torch.inference_mode()
+    def sample(
+        self,
+        model,
+        pflow_shape,
+        *,
+        ctxt_dict,
+        save_seq=False,
+        init_fastsim: torch.Tensor | None = None,
+        to_cpu=True,
+        **kwargs,
+    ):
+        mask = ctxt_dict["fs_mask"]
+        dtype, device = ctxt_dict["ctxt_data"].dtype, ctxt_dict["ctxt_data"].device
+        if init_fastsim is None:
+            fastsim = self._init_fastsim(pflow_shape, mask, device)
+        else:
+            fastsim = init_fastsim
+        fastsim = fastsim.to(dtype)
+        t_steps = self.t_steps.to(device).to(dtype)
+        seq = [fastsim.cpu()]
+        g_scale, n, m = self.g_scale, self.n, self.m
+
+        for i, (t_cur, t_next) in tqdm(
+            enumerate(zip(t_steps[:-1], t_steps[1:])), total=self.n_steps
+        ):
+            tb = t_cur.view(-1, 1, 1)
+            v, _ = model(fastsim, t_cur.expand(fastsim.shape[0]), ctxt_dict)
+            dt = t_next - t_cur
+
+            b = g_scale
+
+            g = b * torch.pow(tb, n / 2) * torch.pow(1.0 - tb, m / 2)
+
+            s_u = -((1.0 - tb) * v + fastsim)
+
+            fr = v - (b**2 * torch.pow(tb, n - 1) * torch.pow(1.0 - tb, m) * s_u / 2.0)
+
+            dbt = torch.sqrt(torch.abs(dt)) * torch.randn_like(fastsim)
+
+            fastsim = fastsim + fr * dt + g * dbt
+            if save_seq:
+                seq.append(fastsim.cpu())
+        if save_seq:
+            seq = torch.stack(seq)
+            return fastsim.cpu(), seq
+        if to_cpu:
+            return fastsim.cpu()
+        return fastsim
+
+
 class SDESampler(Sampler):
     def __init__(
         self,
