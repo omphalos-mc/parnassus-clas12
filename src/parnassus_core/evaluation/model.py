@@ -98,6 +98,7 @@ class EvaluationModel(nn.Module):
         model.change_sampler(
             model_config.sampler_type,
             model_config.n_steps,
+            **model_config.sampler_kwargs,
         )
         return model
 

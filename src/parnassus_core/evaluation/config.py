@@ -14,6 +14,7 @@ class ModelConfig:
     ckpt_path: str | Path
     sampler_type: SamplerType = "euler"
     n_steps: int = 25
+    sampler_kwargs: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if self.sampler_type not in SamplerType.__args__:
