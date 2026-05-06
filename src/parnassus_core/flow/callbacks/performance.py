@@ -334,14 +334,18 @@ class ParticlePerformanceLogger(PerformanceLogger):
         bins_dict = PARTICLE_BINS_DICT.copy()
         plot_name = "PART_ED"
 
-        if "pf_d0" in plot_dict or "pf_d0Error" in plot_dict:
+        target_collection = self.target_collection
+
+        if "pflow_d0" in plot_dict or "pflow_d0Error" in plot_dict:
             plot_dict = self.update_impact_vars(plot_dict)
             bins_dict.update(IMPACT_BINS_DICT)
             plot_name = "PART_IMP_ED"
 
-        if "pf_vz_shifted" in plot_dict:
-            bins_dict["vz"] = np.linspace(-0.5, 0.5, 100)
-            plot_dict["pf_vz"] = plot_dict.pop("pf_vz_shifted")
+        if f"{target_collection}_vz_shifted" in plot_dict:
+            bins_dict["vz"] = np.linspace(-0.1, 0.1, 200)
+            plot_dict[f"{target_collection}_vz"] = plot_dict.pop(
+                f"{target_collection}_vz_shifted"
+            )
             plot_dict["fs_vz"] = plot_dict.pop("fs_vz_shifted")
 
         return plot_dict, bins_dict, plot_name
@@ -440,8 +444,8 @@ class ParticlePerformanceLogger(PerformanceLogger):
             )
             df_cm = pd.DataFrame(
                 cm,
-                index=["Ch had", "El", "Mu", "Neut had", "Phot"],
-                columns=["Ch had", "El", "Mu", "Neut had", "Phot"],
+                index=["Ch had", "El", "Mu", "Neut had", "Phot"][: cm.shape[0]],
+                columns=["Ch had", "El", "Mu", "Neut had", "Phot"][: cm.shape[1]],
             )
             sns.heatmap(
                 df_cm,
@@ -468,8 +472,8 @@ class ParticlePerformanceLogger(PerformanceLogger):
         ctxt_met_x = (ctxt_pt * np.cos(ctxt_phi)).sum(-1)
         ctxt_met_y = (ctxt_pt * np.sin(ctxt_phi)).sum(-1)
 
-        target_pt = plot_dict[f"{target_collection}_pt"] * ctxt_mask
-        target_phi = plot_dict[f"{target_collection}_phi"] * ctxt_mask
+        target_pt = plot_dict[f"{target_collection}_pt"] * fs_mask
+        target_phi = plot_dict[f"{target_collection}_phi"] * fs_mask
         target_ht = target_pt.sum(-1)
         target_met_x = (target_pt * np.cos(target_phi)).sum(-1)
         target_met_y = (target_pt * np.sin(target_phi)).sum(-1)

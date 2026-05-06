@@ -2,6 +2,9 @@ from collections import defaultdict
 from typing import ClassVar, Generic, Literal, Type
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
 
 
 from .labels import VAR_LABELS, RESIDUAL_VAR_LABELS, SAMPLE_LABELS
@@ -41,8 +44,34 @@ AX_WIDTH = 5
 DEFAULT_STYLE_DICT = defaultdict(lambda: dict())
 
 
+def plot_cm(
+    ax,
+    pf_class: np.ndarray,
+    tr_class: np.ndarray,
+    normalize: Literal["true", "pred", "all"] = "true",
+    annot: bool = True,
+    xticklables="auto",
+    yticklables="auto",
+    annot_fs=16,
+):
+    class_labels = ["Ch. had", r"$e^{\pm}$", r"${\mu}^{\pm}$", "Nu. had", r"$\gamma$"]
+    cm_pf = confusion_matrix(tr_class, pf_class, labels=range(5), normalize=normalize)
+    df_cm = pd.DataFrame(cm_pf, index=class_labels, columns=class_labels)
+    sns.heatmap(
+        df_cm,
+        annot=annot,
+        ax=ax,
+        cmap=sns.cubehelix_palette(start=0.5, rot=-0.5, as_cmap=True),
+        fmt=".2f",
+        cbar=False,
+        annot_kws={"size": annot_fs},
+        xticklabels=xticklables,
+        yticklabels=yticklables,
+    )
+
+
 class PlotHelper(Generic[SampleT]):
-    bins_config: ClassVar[Type[BinsConfig[SampleT]]]
+    bins_config: ClassVar[Type[BinsConfig[SampleT]]]  # type: ignore[misc]
 
     def __init__(
         self,
@@ -66,12 +95,13 @@ class PlotHelper(Generic[SampleT]):
         self,
         data_dict_label: str,
         var_list: list[str],
-        bins: dict[SampleT, dict[str, np.ndarray]] | None = None,
+        bins: dict[str, dict[SampleT, np.ndarray]] | None = None,
         log_scale_vars: list[str] | str = [],
         xlabel_prefix: str = "",
         particle_mask_type: str = "all",
     ):
         var_labels = VAR_LABELS | RESIDUAL_VAR_LABELS
+        num_legends = 0
         fig, ax = plt.subplots(
             self.num_samples,
             len(var_list),
@@ -113,9 +143,13 @@ class PlotHelper(Generic[SampleT]):
                         value = value[mask]
                     if var in IMPACT_VARS:
                         value = value[value > -990]
+                    if bins is None:
+                        var_bins = None
+                    else:
+                        var_bins = bins[var][sample]
                     ax[i, j].hist(
                         value,
-                        bins=bins[var][sample],
+                        bins=var_bins,
                         density=True,
                         histtype="stepfilled"
                         if pf_data.source == Source.PF
@@ -154,16 +188,72 @@ class PlotHelper(Generic[SampleT]):
         fig.subplots_adjust(hspace=0.1, wspace=0.15)
         return fig
 
+    # def plot_classes(self):
+    #     num_cols = 0
+    #     for sample in self.performance.sample_data_dict:
+    #         sample_data = self.performance.sample_data_dict[sample]
+    #         num_cols = max(
+    #             num_cols, len(sample_data.data_dict) - 1 * (not self.plot_truth)
+    #         )
+    #     num_cols += 1  # For overall histogram
+    #     fig, ax = plt.subplots(
+    #         self.num_samples,
+    #         num_cols,
+    #         figsize=(num_cols * self.ax_width, self.num_samples * self.ax_height),
+    #     )
+    #     for i, sample in enumerate(self.performance.sample_data_dict):
+    #         sample_data = self.performance.sample_data_dict[sample]
+    #         col_idx = 0
+    #         pf_data_dict = getattr(sample_data.data_dict[Source.PF.name], "particle_data_all")
+    #         pf_class
+    #         for pf_data in sample_data.data_dict.values():
+    #             if not self.plot_truth and (pf_data.source == Source.TR):
+    #                 continue
+    #             if pf_data.source == Source.PF:
+    #                 continue
+    #             data_dict: dict[str, np.ndarray] = getattr(pf_data, "particle_data_all")
+    #             tr_class = np.concatenate(data_dict["class"])  # type: ignore
+    #             plot_cm(
+    #                 ax[i, col_idx],
+    #                 pf_data.pf_class,
+    #                 tr_class,
+    #                 normalize="true",
+    #                 annot=True,
+    #                 xticklables="auto",
+    #                 yticklables="auto",
+    #                 annot_fs=self.font_size,
+    #             )
+    #             if i == 0:
+    #                 ax[i, col_idx].set_title(pf_data.label, fontsize=self.font_size)
+    #             if col_idx == 0:
+    #                 ax[i, col_idx].set_ylabel(
+    #                     SAMPLE_LABELS[sample.name.lower()], fontsize=self.font_size
+    #                 )
+    #             col_idx += 1
+    #         # Overall histogram
+    #         plot_cm(
+    #             ax[i, -1],
+    #             sample_data.overall_pf_class,
+    #             sample_data.overall_tr_class,
+    #             normalize="true",
+    #             annot=True,
+    #             xticklables="auto",
+    #             yticklables="auto",
+    #             annot_fs=self.font_size,
+    #         )
+    #         if i == 0:
+    #             ax[i, -1].set_title("Overall", fontsize=self.font_size)
+
     def plot_event_features(
         self,
-        bins: dict[SampleT, dict[str, np.ndarray]] | None = None,
+        bins: dict[str, dict[SampleT, np.ndarray]] | None = None,
         residuals: bool = False,
     ):
         if residuals:
-            bins = self.bins_config.event_res_bins if bins is None else bins
+            bins = self.bins_config.event_res_bins if bins is None else bins  # type: ignore[assignment]
             event_vars = [f"{var}_res" for var in EVENT_VARS]
         else:
-            bins = self.bins_config.event_bins if bins is None else bins
+            bins = self.bins_config.event_bins if bins is None else bins  # type: ignore[assignment]
             event_vars = EVENT_VARS
         fig = self.plot_features(
             "event_data",
@@ -174,15 +264,15 @@ class PlotHelper(Generic[SampleT]):
 
     def plot_jet_features(
         self,
-        bins: dict[SampleT, dict[str, np.ndarray]] | None = None,
+        bins: dict[str, dict[SampleT, np.ndarray]] | None = None,
         residuals: bool = False,
         log_scale_vars: list[str] | str = [],
     ):
         if residuals:
-            bins = self.bins_config.jet_res_bins if bins is None else bins
+            bins = self.bins_config.jet_res_bins if bins is None else bins  # type: ignore[assignment]
             jet_vars = [f"{var}_res" for var in JET_VARS]
         else:
-            bins = self.bins_config.jet_bins if bins is None else bins
+            bins = self.bins_config.jet_bins if bins is None else bins  # type: ignore[assignment]
             jet_vars = JET_VARS
         if log_scale_vars == "all":
             log_scale_vars = jet_vars
@@ -198,17 +288,17 @@ class PlotHelper(Generic[SampleT]):
 
     def plot_particle_features(
         self,
-        bins: dict[SampleT, dict[str, np.ndarray]] | None = None,
+        bins: dict[str, dict[SampleT, np.ndarray]] | None = None,
         collection: str = "all",
         residuals: bool = False,
         log_scale_vars: list[str] | str = [],
         particle_mask_type: str = "all",
     ):
         if residuals:
-            bins = self.bins_config.particle_res_bins if bins is None else bins
+            bins = self.bins_config.particle_res_bins if bins is None else bins  # type: ignore[assignment]
             particle_vars = [f"{var}_res" for var in PARTICLE_VARS]
         else:
-            bins = self.bins_config.particle_bins if bins is None else bins
+            bins = self.bins_config.particle_bins if bins is None else bins  # type: ignore[assignment]
             particle_vars = PARTICLE_VARS
         if log_scale_vars == "all":
             log_scale_vars = particle_vars
@@ -225,12 +315,12 @@ class PlotHelper(Generic[SampleT]):
 
     def plot_impact_features(
         self,
-        bins: dict[SampleT, dict[str, np.ndarray]] | None = None,
+        bins: dict[str, dict[SampleT, np.ndarray]] | None = None,
         collection: str = "all",
         log_scale_vars: list[str] | str = [],
         particle_mask_type: Literal["had", "el", "mu", "charged"] = "charged",
     ):
-        bins = self.bins_config.particle_bins if bins is None else bins
+        bins = self.bins_config.particle_bins if bins is None else bins  # type: ignore[assignment]
         impact_vars = IMPACT_VARS
         if log_scale_vars == "all":
             log_scale_vars = impact_vars
