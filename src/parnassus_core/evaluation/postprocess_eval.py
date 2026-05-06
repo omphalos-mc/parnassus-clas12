@@ -1,8 +1,11 @@
 import argparse
+from typing import Any
 
 import numpy as np
 import fastjet as fj
 import awkward as ak
+from awkward.contents import ListOffsetArray, NumpyArray, RecordArray
+from awkward.index import Index64
 
 from tqdm import tqdm
 from itertools import product
@@ -398,6 +401,24 @@ def extract_batch_data(
     return evt_truth_data, evt_pflow_data, fs_data
 
 
+def _make_collection_array(var_data: dict[str, list[Any]]) -> ak.Array:
+    """Build a variable-length record array with shared offsets."""
+    if not var_data:
+        return ak.Array([])
+
+    first = next(iter(var_data.values()))
+    counts = np.fromiter((len(arr) for arr in first), dtype=np.int64, count=len(first))
+    offsets = np.zeros(len(counts) + 1, dtype=np.int64)
+    np.cumsum(counts, out=offsets[1:])
+
+    fields = list(var_data.keys())
+    record = RecordArray(
+        [NumpyArray(np.concatenate(var_data[field])) for field in fields],  # type: ignore[arg-type]
+        fields,
+    )
+    return ak.Array(ListOffsetArray(Index64(offsets), record))
+
+
 def main():
     args = parser.parse_args()
 
@@ -470,49 +491,57 @@ def main():
 
     output_path = f"{args.output.replace('.root', '')}_{args.n_events // 1000}k_test_eta{int(args.eta * 10)}Eval.root"
     with uproot.recreate(output_path) as f:
-        # Convert to awkward arrays first
-
-        # Write in batches
         write_batch_size = 1000
         total_events = len(out_data_evt[next(iter(out_data_evt.keys()))])
+
+        particle_collections = ["truth", "pflow", "fastsim"]
+        particle_field_map = {
+            collection: [
+                (key.replace(f"{collection}_", "", 1), key)
+                for key in out_data_evt
+                if key.startswith(collection)
+                and key.replace(f"{collection}_", "", 1) in particle_vars
+            ]
+            for collection in particle_collections
+        }
+        jet_field_map = {
+            collection: [
+                (key.replace(f"{collection}_", "", 1), key)
+                for key in out_data_evt
+                if key.startswith(f"{collection}_jet") and "idx" not in key
+            ]
+            for collection in particle_collections
+        }
 
         for start_idx in tqdm(
             range(0, total_events, write_batch_size), desc="Writing to file"
         ):
             end_idx = min(start_idx + write_batch_size, total_events)
-            # batch_data = {key: val[start_idx:end_idx] for key, val in all_data.items()}
+
             particle_data = {
-                collection: ak.zip(
+                collection: _make_collection_array(
                     {
-                        key.replace(f"{collection}_", "", 1): ak.Array(
-                            val[start_idx:end_idx]
-                        )
-                        for key, val in out_data_evt.items()
-                        if key.startswith(collection)
-                        and key.replace(f"{collection}_", "", 1) in particle_vars
+                        field: out_data_evt[key][start_idx:end_idx]
+                        for field, key in particle_field_map[collection]
                     }
                 )
-                for collection in ["truth", "pflow", "fastsim"]
+                for collection in particle_collections
             }
             jet_data = {
-                f"{collection}_jets": ak.zip(
+                f"{collection}_jets": _make_collection_array(
                     {
-                        key.replace(f"{collection}_", "", 1): ak.Array(
-                            val[start_idx:end_idx]
-                        )
-                        for key, val in out_data_evt.items()
-                        if key.startswith(f"{collection}_jet") and "idx" not in key
+                        field: out_data_evt[key][start_idx:end_idx]
+                        for field, key in jet_field_map[collection]
                     }
                 )
-                for collection in ["truth", "pflow", "fastsim"]
+                for collection in particle_collections
             }
             event_data = {
-                key: ak.Array(val[start_idx:end_idx])
+                key: np.asarray(val[start_idx:end_idx])
                 for key, val in out_data_evt.items()
                 if key in event_vars
             }
 
-            # Combine all data
             batch_data = event_data | particle_data | jet_data
 
             if start_idx == 0:
