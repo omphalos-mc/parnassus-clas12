@@ -8,7 +8,6 @@ from parnassus_core.flow.modules.optimizer import Lion
 from parnassus_core.flow.sampling import (
     DPM_Solver,
     EulerSampler,
-    NoiseScheduleFlow,
     PNDMSampler,
     SDESampler,
 )
@@ -130,9 +129,7 @@ class FlowLightning(LightningModule):
                     vt = ig + self.ig_sampling_weight * (vt - ig)
                 return (1 - timestep.view(self.net.time_shape)) * vt + x
 
-            self.sampler = DPM_Solver(
-                model_fn=model_fn, noise_schedule=NoiseScheduleFlow()
-            )
+            self.sampler = DPM_Solver(model_fn=model_fn)
         print(f"Using sampler: {self.sampler_type} with {self.n_steps} steps")
 
     def forward(self, data: tuple[torch.Tensor, dict[str, torch.Tensor]]):
@@ -170,8 +167,6 @@ class FlowLightning(LightningModule):
                 torch.randn(fs_shape, device=ctxt_dict["ctxt_data"].device),
                 ctxt_dict=ctxt_dict,
                 steps=n_steps,
-                method="multistep",
-                skip_type="time_uniform_flow",
             )
 
     def training_step(self, data, batch_idx):
