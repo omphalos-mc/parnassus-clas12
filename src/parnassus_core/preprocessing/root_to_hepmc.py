@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 import numpy as np
 import pyhepmc
@@ -6,21 +7,19 @@ import uproot
 from tqdm import tqdm
 
 
-def load_data(filepath, entry_stop=100_000, mode="evt"):
+def load_data(filepath, entry_stop=100_000):
     with uproot.open(
         filepath,
         num_workers=4,
     ) as f:
-        data = {}
-        tree_name = f"{mode}_tree"
+        tree_name = "evt_tree"
         if tree_name not in f:
             raise ValueError(f"Tree {tree_name} not found in file {filepath}")
         tree = f[tree_name]
-        print(f"Loading {mode} data from {filepath}")
+        print(f"Loading data from {filepath}")
         print(f"Entries: {tree.num_entries}")
-        for var in tree.keys():
-            if "pflow" not in var:
-                data[var] = tree[var].array(library="np", entry_stop=entry_stop)
+        vars_to_load = [var for var in tree.keys() if "pflow" not in var]
+        data = tree.arrays(vars_to_load, library="np", entry_stop=entry_stop)
     return data
 
 
@@ -128,10 +127,11 @@ parser.add_argument("-i", "--input", type=str, required=True, help="Input ROOT f
 parser.add_argument("-n", "--num_entries", type=int, help="Num entries to convert")
 
 args = parser.parse_args()
+input_path = Path(args.input)
+output_path = input_path.parent
 
-data = load_data(args.input, mode=args.mode, entry_stop=args.num_entries)
+data = load_data(args.input, entry_stop=args.num_entries)
 prefix = args.input.split("/")[-1].split(".")[0]
-output_path = args.input.replace(prefix + ".root", "")
 total_entries = len(data["truth_pt"])
 
 print("Converting...")

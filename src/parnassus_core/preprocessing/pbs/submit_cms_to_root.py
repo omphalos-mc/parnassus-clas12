@@ -56,11 +56,17 @@ def submit_jobs(config, tag="tmp", dry_run=False):
 
     # Iterate over parent groups and subgroups
     for parent_group, subgroups in file_groups.items():
+        print(f"Processing group: {parent_group}")
         if not isinstance(subgroups, dict):
             subgroups = {
                 "": subgroups
             }  # Handle case where files are directly under parent group
         for subgroup_name, file_list in subgroups.items():
+            if not isinstance(file_list, list):
+                print(
+                    f"Warning: file list for group '{parent_group}/{subgroup_name}' is not a list. Skipping."
+                )
+                continue
             # Construct full group path: parent_group/subgroup_name
             full_group_path = os.path.join(parent_group, subgroup_name)
 
@@ -78,7 +84,6 @@ def submit_jobs(config, tag="tmp", dry_run=False):
             # Create output directory for this group (preserve nested structure)
             out_dir = os.path.join(target_top_dir, full_group_path)
             os.makedirs(out_dir, exist_ok=True)
-
             # Process each file in the subgroup
             for jobID, file_rel_path in enumerate(file_list):
                 # Construct full input path

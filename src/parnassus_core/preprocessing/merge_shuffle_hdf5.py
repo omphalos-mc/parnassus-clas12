@@ -74,6 +74,12 @@ def get_parser():
         help="Take equal number of events from each file (uses min events across all files).",
     )
 
+    parser.add_argument(
+        "--no-shuffle",
+        action="store_true",
+        help="Disable shuffling and just concatenate files in order.",
+    )
+
     return parser.parse_args()
 
 
@@ -142,6 +148,7 @@ class MergeShuffleHDF5:
         self.seed = args.seed
         self.n_events_limit = args.nevents
         self.equal_events = args.equal_events
+        self.no_shuffle = args.no_shuffle
 
         # Open all input files and store handles
         print("Opening input files...")
@@ -378,6 +385,10 @@ class MergeShuffleHDF5:
             const_name: np.concatenate(const_batches, axis=0)
             for const_name, const_batches in all_constituents.items()
         }
+
+        # If no shuffle, return concatenated batches as is
+        if self.no_shuffle:
+            return concatenated_events, concatenated_constituents
 
         # Shuffle the concatenated batch
         total_size = concatenated_events.shape[0]
