@@ -356,3 +356,40 @@ def test_attention_torch_fallback(attn_type, has_gpu):
     ):
         attn = Attention(dim=128, num_heads=8, attn_type=attn_type)
     assert attn.attn_type == "torch"
+
+
+@pytest.mark.parametrize("attn_type", ATTN_TYPES_GPU)
+@pytest.mark.gpu
+def test_attn_gating(attn_type):
+    # generate inputs
+    x = torch.randn(2, 128, 128, dtype=torch.float16, device=DEVICE)
+
+    # Initialize attention layers
+    attn = (
+        Attention(
+            dim=128,
+            num_heads=8,
+            attn_type=attn_type,
+            bias=False,
+            attn_gating=True,
+        )
+        .to(DEVICE)
+        .half()
+    )
+    torch_attn = (
+        Attention(
+            dim=128,
+            num_heads=8,
+            attn_type="torch",
+            bias=False,
+            attn_gating=True,
+        )
+        .to(DEVICE)
+        .half()
+    )
+    copy_attention_weights(attn, torch_attn)
+    out_torch = torch_attn(x, x)
+    out = attn(x, x)
+
+    assert out.shape == x.shape
+    torch.testing.assert_close(out, out_torch, atol=1e-3, rtol=1e-3)
