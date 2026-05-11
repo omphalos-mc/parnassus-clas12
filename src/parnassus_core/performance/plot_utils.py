@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import ClassVar, Generic, Literal, Type
+from typing import ClassVar, Generic, Literal, Type, cast
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -10,6 +10,7 @@ from sklearn.metrics import confusion_matrix
 from .labels import VAR_LABELS, RESIDUAL_VAR_LABELS, SAMPLE_LABELS
 from .bins import BinsConfig
 from .config import SampleT, Source
+from .utils import get_classes
 from .performance import Performance
 
 EVENT_VARS = ["npart", "njet", "met_x", "met_y", "ht"]
@@ -107,6 +108,7 @@ class PlotHelper(Generic[SampleT]):
             len(var_list),
             figsize=(len(var_list) * self.ax_width, self.num_samples * self.ax_height),
         )
+        ax = cast(np.ndarray, ax)
         if len(ax.shape) == 1:
             ax = ax.reshape((self.num_samples, len(var_list)))
         for i, sample in enumerate(self.performance.sample_data_dict):
@@ -188,61 +190,77 @@ class PlotHelper(Generic[SampleT]):
         fig.subplots_adjust(hspace=0.1, wspace=0.15)
         return fig
 
-    # def plot_classes(self):
-    #     num_cols = 0
-    #     for sample in self.performance.sample_data_dict:
-    #         sample_data = self.performance.sample_data_dict[sample]
-    #         num_cols = max(
-    #             num_cols, len(sample_data.data_dict) - 1 * (not self.plot_truth)
-    #         )
-    #     num_cols += 1  # For overall histogram
-    #     fig, ax = plt.subplots(
-    #         self.num_samples,
-    #         num_cols,
-    #         figsize=(num_cols * self.ax_width, self.num_samples * self.ax_height),
-    #     )
-    #     for i, sample in enumerate(self.performance.sample_data_dict):
-    #         sample_data = self.performance.sample_data_dict[sample]
-    #         col_idx = 0
-    #         pf_data_dict = getattr(sample_data.data_dict[Source.PF.name], "particle_data_all")
-    #         pf_class
-    #         for pf_data in sample_data.data_dict.values():
-    #             if not self.plot_truth and (pf_data.source == Source.TR):
-    #                 continue
-    #             if pf_data.source == Source.PF:
-    #                 continue
-    #             data_dict: dict[str, np.ndarray] = getattr(pf_data, "particle_data_all")
-    #             tr_class = np.concatenate(data_dict["class"])  # type: ignore
-    #             plot_cm(
-    #                 ax[i, col_idx],
-    #                 pf_data.pf_class,
-    #                 tr_class,
-    #                 normalize="true",
-    #                 annot=True,
-    #                 xticklables="auto",
-    #                 yticklables="auto",
-    #                 annot_fs=self.font_size,
-    #             )
-    #             if i == 0:
-    #                 ax[i, col_idx].set_title(pf_data.label, fontsize=self.font_size)
-    #             if col_idx == 0:
-    #                 ax[i, col_idx].set_ylabel(
-    #                     SAMPLE_LABELS[sample.name.lower()], fontsize=self.font_size
-    #                 )
-    #             col_idx += 1
-    #         # Overall histogram
-    #         plot_cm(
-    #             ax[i, -1],
-    #             sample_data.overall_pf_class,
-    #             sample_data.overall_tr_class,
-    #             normalize="true",
-    #             annot=True,
-    #             xticklables="auto",
-    #             yticklables="auto",
-    #             annot_fs=self.font_size,
-    #         )
-    #         if i == 0:
-    #             ax[i, -1].set_title("Overall", fontsize=self.font_size)
+    def plot_classes(self):
+        num_cols = 0
+        for sample in self.performance.sample_data_dict:
+            sample_data = self.performance.sample_data_dict[sample]
+            num_cols = max(
+                num_cols, len(sample_data.data_dict) - 1 * (not self.plot_truth)
+            )
+        num_cols += 1  # For overall histogram
+        fig, ax = plt.subplots(
+            self.num_samples,
+            num_cols,
+            figsize=(num_cols * self.ax_width, self.num_samples * self.ax_height),
+        )
+        ax = cast(np.ndarray, ax)
+        if len(ax.shape) == 1:
+            ax = ax.reshape((self.num_samples, num_cols))
+        for i, sample in enumerate(self.performance.sample_data_dict):
+            sample_data = self.performance.sample_data_dict[sample]
+            col_idx = 0
+            tr_data_dict = getattr(
+                sample_data.data_dict[Source.TR.name], "particle_data_all"
+            )
+            for pf_data in sample_data.data_dict.values():
+                if pf_data.source == Source.TR:
+                    continue
+                data_dict: dict[str, np.ndarray] = getattr(pf_data, "particle_data_all")
+                pf_class_matched, tr_class_matched = get_classes(
+                    data_dict["tr_idx"], data_dict["pf_idx"], data_dict, tr_data_dict
+                )
+                plot_cm(
+                    ax[i, col_idx],
+                    pf_class_matched,
+                    tr_class_matched,
+                    normalize="true",
+                    annot=True,
+                    xticklables="auto",
+                    yticklables="auto",
+                    annot_fs=self.font_size // 2,
+                )
+                if i == 0:
+                    ax[i, col_idx].set_title(pf_data.label, fontsize=self.font_size)
+                if col_idx == 0:
+                    ax[i, col_idx].set_ylabel(
+                        SAMPLE_LABELS[sample.name.lower()], fontsize=self.font_size
+                    )
+                col_idx += 1
+                # Overall histogram
+                ax[i, -1].hist(
+                    np.concatenate(data_dict["class"]),
+                    bins=np.arange(6) - 0.5,
+                    density=True,
+                    histtype="stepfilled" if pf_data.source == Source.PF else "step",
+                    label=pf_data.label,
+                    **self.style_dict[pf_data.name],
+                )
+            if i == 0:
+                ax[i, -1].set_title("Overall", fontsize=self.font_size)
+            ax[i, -1].set_xticks(
+                range(5),
+                ["Ch. had", r"$e^{\pm}$", r"${\mu}^{\pm}$", "Nu. had", r"$\gamma$"],
+            )
+            ax[i, -1].legend(
+                fancybox=True,
+                loc="upper right",
+            )
+            ax[i, -1].yaxis.tick_right()
+            ax[i, -1].set_ylabel("a.u.", fontsize=self.font_size)
+            ax[i, -1].yaxis.set_label_position("right")
+        fig.tight_layout()
+        fig.subplots_adjust(hspace=0.1, wspace=0.15)
+        return fig
 
     def plot_event_features(
         self,
