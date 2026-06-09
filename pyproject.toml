@@ -7,8 +7,35 @@ name = "parnassus_core"
 requires-python = ">= 3.11"
 version = "0.1.0"
 dependencies = [
+    "awkward",
+    "h5py",
+    "numpy",
+    "uproot",
+    "torch<=2.9.1",
+    "torchvision",
+    "tqdm",
+    "matplotlib",
+    "scipy",
+    "scikit-learn",
+    "fastjet",
+    "comet_ml",
+    "lightning==2.6.1",
+    "seaborn",
+    "networkx",
+    "hdf5plugin",
+    "lion-pytorch",
+    "onnx",
+    "onnxruntime"
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+
+[dependency-groups]
+dev = [
+  "pytest",
+  "pytest-cov",
+  "ruff",
+]

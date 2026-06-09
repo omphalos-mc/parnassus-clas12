@@ -38,12 +38,15 @@ def get_parser():
         "--output",
         type=str,
         required=True,
-        help="Output HDF5 file path.",
+        help=(
+            "Output HDF5 file path. With --events-per-file, numbered files "
+            "such as output_00000.h5 are created."
+        ),
     )
 
     parser.add_argument(
         "-bs",
-        "--batch_size",
+        "--batch-size",
         type=int,
         required=False,
         default=10_000,
@@ -77,7 +80,29 @@ def get_parser():
     parser.add_argument(
         "--no-shuffle",
         action="store_true",
-        help="Disable shuffling and just concatenate files in order.",
+        help=(
+            "Disable shuffling and concatenate inputs sequentially: all events "
+            "from the first file, then the second file, and so on."
+        ),
+    )
+
+    parser.add_argument(
+        "--events-per-file",
+        type=int,
+        default=None,
+        help=(
+            "Approximate number of events per output file. Files rotate after "
+            "a complete write batch, so they may contain slightly more events."
+        ),
+    )
+
+    parser.add_argument(
+        "--skip-overlap-check",
+        action="store_true",
+        help=(
+            "Skip checking for overlapping event numbers between input files. "
+            "This can speed up processing if you are sure there are no overlaps."
+        ),
     )
 
     return parser.parse_args()
@@ -125,10 +150,10 @@ def discover_input_files(input_list: list[str]) -> list[Path]:
 
 class MergeShuffleHDF5:
     """
-    Merge and shuffle multiple HDF5 files into a single output file.
+    Merge and shuffle multiple HDF5 files into one or more output files.
 
     This class reads multiple HDF5 files (outputs from root_to_hdf5.py),
-    shuffles all events globally, and writes them to a new HDF5 file
+    shuffles all events globally, and writes them to new HDF5 files
     with source file tracking.
     """
 
@@ -141,18 +166,24 @@ class MergeShuffleHDF5:
         args : parse_args
             Command line arguments
         """
-        # Discover input files
-        self.input_files = discover_input_files(args.input)
         self.output = Path(args.output)
         self.batch_size = args.batch_size
+        if self.batch_size <= 0:
+            raise ValueError("--batch-size must be greater than zero")
         self.seed = args.seed
         self.n_events_limit = args.nevents
         self.equal_events = args.equal_events
         self.no_shuffle = args.no_shuffle
+        self.events_per_output_file = args.events_per_file
+        if self.events_per_output_file is not None and self.events_per_output_file <= 0:
+            raise ValueError("--events-per-file must be greater than zero")
 
+        # Discover input files
+        self.file_handles: list[h5py.File] = []
+
+        self.input_files = discover_input_files(args.input)
         # Open all input files and store handles
         print("Opening input files...")
-        self.file_handles: list[h5py.File] = []
         for fpath in self.input_files:
             self.file_handles.append(h5py.File(fpath, "r"))
 
@@ -175,7 +206,8 @@ class MergeShuffleHDF5:
         )
 
         # Check for overlapping event numbers
-        self._check_event_number_overlaps()
+        if not args.skip_overlap_check:
+            self._check_event_number_overlaps()
 
         # Apply equal events constraint if specified
         if self.equal_events:
@@ -192,29 +224,35 @@ class MergeShuffleHDF5:
             self.total_events = self.n_events_limit
             print(f"Limiting to {self.total_events} events")
 
-        # Calculate file-specific batch sizes for better mixing
-        self.batch_sizes_per_file = self._calculate_batch_sizes_per_file()
-        total_to_use = sum(self.events_per_file_limited)
-        print("Batch sizes per file:")
-        for i, (batch_size, n_events_limited) in enumerate(
-            zip(self.batch_sizes_per_file, self.events_per_file_limited)
-        ):
-            proportion = n_events_limited / total_to_use
-            actual_events = self.events_per_file[i]
-            if self.equal_events:
-                print(
-                    f"  File {i} ({self.input_files[i].name}): {batch_size:6d} ({proportion:6.2%} of events, using {n_events_limited}/{actual_events})"
-                )
-            else:
-                print(
-                    f"  File {i} ({self.input_files[i].name}): {batch_size:6d} ({proportion:6.2%} of events)"
-                )
-        print(f"  Total batch size: {sum(self.batch_sizes_per_file)}")
-
-        # Create batch descriptors for efficient sequential reading
-        print(f"Creating batch descriptors (seed={self.seed})...")
         self.rng = np.random.default_rng(self.seed)
-        self.batch_descriptors = self._create_batch_descriptors()
+        if self.no_shuffle:
+            print(
+                f"Sequential mode: reading {self.batch_size} events at a time "
+                "from each input file in order"
+            )
+        else:
+            # Calculate file-specific batch sizes for better mixing
+            self.batch_sizes_per_file = self._calculate_batch_sizes_per_file()
+            total_to_use = sum(self.events_per_file_limited)
+            print("Batch sizes per file:")
+            for i, (batch_size, n_events_limited) in enumerate(
+                zip(self.batch_sizes_per_file, self.events_per_file_limited)
+            ):
+                proportion = n_events_limited / total_to_use
+                actual_events = self.events_per_file[i]
+                if self.equal_events:
+                    print(
+                        f"  File {i} ({self.input_files[i].name}): {batch_size:6d} ({proportion:6.2%} of events, using {n_events_limited}/{actual_events})"
+                    )
+                else:
+                    print(
+                        f"  File {i} ({self.input_files[i].name}): {batch_size:6d} ({proportion:6.2%} of events)"
+                    )
+            print(f"  Total batch size: {sum(self.batch_sizes_per_file)}")
+
+            # Create batch descriptors for mixed-file reading
+            print(f"Creating batch descriptors (seed={self.seed})...")
+            self.batch_descriptors = self._create_batch_descriptors()
 
     def _check_event_number_overlaps(self) -> None:
         """
@@ -349,35 +387,14 @@ class MergeShuffleHDF5:
 
         # Read batches from each file
         for batch_descriptor in batch_descriptors:
-            file_idx = batch_descriptor["file_idx"]
-            start_idx = batch_descriptor["start_idx"]
-            end_idx = batch_descriptor["end_idx"]
-            source_file_idx = batch_descriptor["source_file_idx"]
-
-            file_handle = self.file_handles[file_idx]
-
-            # Read sequential batch from file (efficient!)
-            events_batch = cast(h5py.Dataset, file_handle["events"])[start_idx:end_idx]
-
-            # Add source_file_idx field to events
-            batch_size = end_idx - start_idx
-            source_file_array = np.full(batch_size, source_file_idx, dtype=np.int32)
-            events_batch = append_fields(
-                events_batch,
-                "source_file_idx",
-                source_file_array,
-                dtypes=np.int32,
-                usemask=False,
-            )  # pyright: ignore[reportCallIssue]
-
+            events_batch, constituent_batches = self._read_batch(
+                file_idx=batch_descriptor["file_idx"],
+                start_idx=batch_descriptor["start_idx"],
+                end_idx=batch_descriptor["end_idx"],
+            )
             all_events.append(events_batch)
-
-            # Read constituents
             for const_name in self.constituent_names:
-                constituent_batch = cast(h5py.Dataset, file_handle[const_name])[
-                    start_idx:end_idx
-                ]
-                all_constituents[const_name].append(constituent_batch)
+                all_constituents[const_name].append(constituent_batches[const_name])
 
         # Concatenate all batches
         concatenated_events = np.concatenate(all_events, axis=0)
@@ -385,10 +402,6 @@ class MergeShuffleHDF5:
             const_name: np.concatenate(const_batches, axis=0)
             for const_name, const_batches in all_constituents.items()
         }
-
-        # If no shuffle, return concatenated batches as is
-        if self.no_shuffle:
-            return concatenated_events, concatenated_constituents
 
         # Shuffle the concatenated batch
         total_size = concatenated_events.shape[0]
@@ -402,36 +415,89 @@ class MergeShuffleHDF5:
 
         return concatenated_events, concatenated_constituents
 
+    def _read_batch(
+        self, file_idx: int, start_idx: int, end_idx: int
+    ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+        """Read one sequential event range from one input file."""
+        file_handle = self.file_handles[file_idx]
+        events_batch = cast(h5py.Dataset, file_handle["events"])[start_idx:end_idx]
+
+        source_file_array = np.full(end_idx - start_idx, file_idx, dtype=np.int32)
+        if "source_file_idx" in events_batch.dtype.names:
+            # Rewrite existing source_file_idx if it already exists (e.g. from a previous merge)
+            events_batch["source_file_idx"] = source_file_array
+        else:
+            events_batch = append_fields(
+                events_batch,
+                "source_file_idx",
+                source_file_array,
+                dtypes=np.int32,
+                usemask=False,
+            )  # pyright: ignore[reportCallIssue]
+
+        constituent_batches = {
+            const_name: cast(h5py.Dataset, file_handle[const_name])[start_idx:end_idx]
+            for const_name in self.constituent_names
+        }
+        return events_batch, constituent_batches
+
+    def _output_path(self, output_index: int) -> Path:
+        """Return the output path for a numbered file."""
+        if self.events_per_output_file is None:
+            return self.output
+
+        suffix = self.output.suffix or ".h5"
+        stem = self.output.stem if self.output.suffix else self.output.name
+        return self.output.with_name(f"{stem}_{output_index:05d}{suffix}")
+
+    def _batches(self):
+        """Yield sequential batches or shuffled mixed-file batches."""
+        if self.no_shuffle:
+            for file_idx, n_events in enumerate(self.events_per_file_limited):
+                for start_idx in range(0, n_events, self.batch_size):
+                    end_idx = min(start_idx + self.batch_size, n_events)
+                    yield self._read_batch(file_idx, start_idx, end_idx)
+            return
+
+        max_batches = max(len(batches) for batches in self.batch_descriptors)
+        for batch_round in range(max_batches):
+            batch_descriptors = [
+                file_batches[batch_round]
+                for file_batches in self.batch_descriptors
+                if batch_round < len(file_batches)
+            ]
+            yield self._read_concatenate_shuffle_batches(batch_descriptors)
+
+    @staticmethod
+    def _chunk_shape(key: str, value: np.ndarray):
+        if key == "events":
+            return (max(1, min(1024, len(value))),)
+        return (max(1, min(64, len(value))), value.shape[1])
+
     def run(self) -> None:
         """
         Execute the merge and shuffle operation.
         """
-        print(f"Writing shuffled data to {self.output}...")
-
-        # Determine maximum number of batches across all files
-        max_batches = max(len(batches) for batches in self.batch_descriptors)
+        mode = "concatenated" if self.no_shuffle else "shuffled"
+        if self.events_per_output_file is None:
+            print(f"Writing {mode} data to {self.output}...")
+        else:
+            print(
+                f"Writing {mode} data to numbered files based on {self.output} "
+                f"(approximately {self.events_per_output_file} events per file)..."
+            )
 
         events_written = 0
+        events_in_output = 0
+        output_index = 0
+        output_paths: list[Path] = []
+        out_file: h5py.File | None = None
+        events_dataset: h5py.Dataset | None = None
+        constituent_datasets: dict[str, h5py.Dataset] = {}
         pbar = tqdm(total=self.total_events, desc="Writing events")
 
-        # Open output file once and keep it open
-        with h5py.File(self.output, "w") as out_file:
-            events_dataset = None
-            constituent_datasets = {}
-
-            # Process batches in rounds: each round reads one batch from each file
-            for batch_round in range(max_batches):
-                # Collect batch descriptors for this round (one per file, if available)
-                current_batch_descriptors = []
-                for file_batches in self.batch_descriptors:
-                    if batch_round < len(file_batches):
-                        current_batch_descriptors.append(file_batches[batch_round])
-
-                # Read from all files, concatenate, and shuffle
-                events_batch, constituent_batches = (
-                    self._read_concatenate_shuffle_batches(current_batch_descriptors)
-                )
-
+        try:
+            for events_batch, constituent_batches in self._batches():
                 # Apply event limit if specified
                 if self.n_events_limit is not None:
                     remaining = self.n_events_limit - events_written
@@ -444,13 +510,23 @@ class MergeShuffleHDF5:
                                 const_name
                             ][:remaining]
 
+                if out_file is None:
+                    output_path = self._output_path(output_index)
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    print(f"Opening output file: {output_path}")
+                    out_file = h5py.File(output_path, "w")
+                    output_paths.append(output_path)
+                    events_dataset = None
+                    constituent_datasets = {}
+                    events_in_output = 0
+
                 if events_dataset is None:
                     # Create datasets on first batch
                     events_dataset = out_file.create_dataset(
                         "events",
                         data=events_batch,
                         maxshape=(None,),
-                        chunks=True,
+                        chunks=self._chunk_shape("events", events_batch),
                         compression=hdf5plugin.LZ4(),
                     )
 
@@ -460,12 +536,12 @@ class MergeShuffleHDF5:
                             const_name,
                             data=const_data,
                             maxshape=(None,) + const_data.shape[1:],
-                            chunks=True,
+                            chunks=self._chunk_shape(const_name, const_data),
                             compression=hdf5plugin.LZ4(),
                         )
 
                     # Write metadata
-                    self._write_metadata(out_file)
+                    self._write_metadata(out_file, output_index)
 
                 else:
                     # Append to existing datasets
@@ -484,7 +560,17 @@ class MergeShuffleHDF5:
 
                 batch_size = events_batch.shape[0]
                 events_written += batch_size
+                events_in_output += batch_size
                 pbar.update(batch_size)
+
+                if (
+                    self.events_per_output_file is not None
+                    and events_in_output >= self.events_per_output_file
+                ):
+                    out_file.attrs["events_in_file"] = events_in_output
+                    out_file.close()
+                    out_file = None
+                    output_index += 1
 
                 # Stop if we've reached the event limit
                 if (
@@ -492,11 +578,18 @@ class MergeShuffleHDF5:
                     and events_written >= self.n_events_limit
                 ):
                     break
+        finally:
+            if out_file is not None:
+                out_file.attrs["events_in_file"] = events_in_output
+                out_file.close()
+            pbar.close()
 
-        pbar.close()
-        print(f"Successfully wrote {events_written} events to {self.output}")
+        print(
+            f"Successfully wrote {events_written} events to "
+            f"{len(output_paths)} output file(s)"
+        )
 
-    def _write_metadata(self, h5file: h5py.File) -> None:
+    def _write_metadata(self, h5file: h5py.File, output_index: int) -> None:
         """
         Write metadata as HDF5 attributes.
 
@@ -517,6 +610,12 @@ class MergeShuffleHDF5:
         )
         h5file.attrs["created_at"] = datetime.now().isoformat()
         h5file.attrs["total_events"] = self.total_events
+        h5file.attrs["output_file_index"] = output_index
+        h5file.attrs["events_per_file_target"] = (
+            self.events_per_output_file
+            if self.events_per_output_file is not None
+            else self.total_events
+        )
         h5file.attrs["created_by"] = "merge_shuffle_hdf5.py"
 
     def close(self) -> None:

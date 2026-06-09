@@ -1,6 +1,7 @@
 import argparse
 from collections import defaultdict
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Generator, cast, final
 
@@ -40,6 +41,7 @@ from tqdm import tqdm
 MAX_PARTICLES_DICT = defaultdict(lambda: 400)
 MAX_PARTICLES_DICT.update({"hadrons": 50})
 
+LONG_VARIABLES = {"eventNumber"}
 INT_VARIABLES = {"pdgId"}
 SHORT_VARIABLES = {"class", "label", "charge"}
 
@@ -83,9 +85,10 @@ def get_parser():
     parser.add_argument(
         "-m",
         "--max_particles",
-        type=int,
+        type=json.loads,
         required=False,
-        help="Enter the maximum number of particles per event.",
+        help="Enter the maximum number of constituents to keep per type as a JSON string, "
+        'e.g. \'{"pflow": 200, "truth": 100}\' (default: 400 for all types, except hadrons which defaults to 50).',
     )
 
     parser.add_argument(
@@ -217,9 +220,19 @@ class PrepareSamples:
             self.output = Path(args.output)
 
         self.n_events = args.nevents
-        self.max_particles_dict = (
-            args.max_particles if args.max_particles is not None else MAX_PARTICLES_DICT
-        )
+        self.max_particles_dict = MAX_PARTICLES_DICT.copy()
+        if args.max_particles:
+            if not isinstance(args.max_particles, dict) or not all(
+                isinstance(name, str)
+                and isinstance(limit, int)
+                and not isinstance(limit, bool)
+                and limit > 0
+                for name, limit in args.max_particles.items()
+            ):
+                raise ValueError(
+                    "max_particles must be a JSON object with positive integer values"
+                )
+            self.max_particles_dict |= args.max_particles
         self.batch_size = args.batch_size
         self.cut_events = args.cut_events
         self.shuffle = args.shuffle
@@ -368,11 +381,25 @@ class PrepareSamples:
         return tree_data
 
     def _convert_events(self, events):
-        event_dtype = np.dtype([(key, "f4") for key in events])
+        field_dtypes = []
+        field_np_dtypes = {}
+        for key in events.keys():
+            if key in LONG_VARIABLES:
+                field_dtypes.append((key, "i8"))
+                field_np_dtypes[key] = np.int64
+            elif key in INT_VARIABLES or "npart" in key:
+                field_dtypes.append((key, "i4"))
+                field_np_dtypes[key] = np.int32
+            elif key in SHORT_VARIABLES:
+                field_dtypes.append((key, "i2"))
+                field_np_dtypes[key] = np.int16
+            else:
+                field_dtypes.append((key, "f4"))
+                field_np_dtypes[key] = np.float32
         n_events = len(next(iter(events.values()))) if events else 0
-        out = np.empty(n_events, dtype=event_dtype)
+        out = np.empty(n_events, dtype=np.dtype(field_dtypes))
         for key, values in events.items():
-            out[key] = np.asarray(values, dtype=np.float32)
+            out[key] = np.asarray(values, dtype=field_np_dtypes[key])
         return out
 
     def _convert_constituents(self, arrays, max_size, start_index=0, end_index=None):
@@ -409,7 +436,10 @@ class PrepareSamples:
         field_dtypes = []
         field_np_dtypes = {}
         for key in arrays.keys():
-            if key in INT_VARIABLES:
+            if key in LONG_VARIABLES:
+                field_dtypes.append((key, "i8"))
+                field_np_dtypes[key] = np.int64
+            elif key in INT_VARIABLES:
                 field_dtypes.append((key, "i4"))
                 field_np_dtypes[key] = np.int32
             elif key in SHORT_VARIABLES:
@@ -424,7 +454,7 @@ class PrepareSamples:
 
         # Initialize pads in-place in the structured output.
         for key in arrays.keys():
-            if key in INT_VARIABLES or key in SHORT_VARIABLES:
+            if key in LONG_VARIABLES | INT_VARIABLES | SHORT_VARIABLES:
                 out[key].fill(0)
             else:
                 out[key].fill(np.nan)

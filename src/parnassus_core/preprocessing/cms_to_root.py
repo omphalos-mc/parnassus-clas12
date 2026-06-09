@@ -188,6 +188,12 @@ parser.add_argument(
 )
 parser.add_argument("-pt", "--pt_cut", type=float, help="Truth pt cut", default=0.0)
 parser.add_argument("-eta", "--eta_cut", type=float, help="Eta cut", default=2.7)
+parser.add_argument(
+    "--pflow-pt-cut",
+    type=float,
+    default=1.0,
+    help="PT cut for pflow particles (default: 1.0 GeV)",
+)
 
 
 # ============================================================================
@@ -350,7 +356,9 @@ def load_event_scalars(filelist, n_events=None, entry_start=0):
     return data  # Returns dict with awkward arrays
 
 
-def process_particle_collections(data, n_events, tr_pt_cut=0.0, eta_cut=2.7):
+def process_particle_collections(
+    data, n_events, tr_pt_cut=0.0, eta_cut=2.7, pf_pt_cut=1.0
+):
     """Apply filtering and add derived variables to particle collections."""
     print("Processing particle collections with awkward arrays...")
 
@@ -373,7 +381,7 @@ def process_particle_collections(data, n_events, tr_pt_cut=0.0, eta_cut=2.7):
 
         # Apply filtering (vectorized over all events)
         pf_mask = (
-            (data["pfcs"]["pt"] > 1)
+            (data["pfcs"]["pt"] > pf_pt_cut)
             & (np.abs(data["pfcs"]["eta"]) < eta_cut)
             & (data["pfcs"]["class"] < 5)
         )
@@ -450,7 +458,9 @@ def process_particle_collections(data, n_events, tr_pt_cut=0.0, eta_cut=2.7):
     return data
 
 
-def load_files(filelist, n_events=None, entry_start=0, tr_pt_cut=0, eta_cut=2.7):
+def load_files(
+    filelist, n_events=None, entry_start=0, tr_pt_cut=0, eta_cut=2.7, pf_pt_cut=1.0
+):
     """Load and process all data from ROOT files."""
     # Load particle collections
     particle_data = load_particle_collections(filelist, n_events, entry_start)
@@ -472,7 +482,7 @@ def load_files(filelist, n_events=None, entry_start=0, tr_pt_cut=0, eta_cut=2.7)
 
     # Process particle collections (filtering, charge/class derivation)
     particle_data = process_particle_collections(
-        particle_data, n_events_actual, tr_pt_cut, eta_cut
+        particle_data, n_events_actual, tr_pt_cut, eta_cut, pf_pt_cut
     )
 
     return particle_data, scalar_data
@@ -501,6 +511,7 @@ def main():
         entry_start=args.entry_start,
         tr_pt_cut=args.pt_cut,
         eta_cut=args.eta_cut,
+        pf_pt_cut=args.pflow_pt_cut,
     )
     print("All data loaded")
 
