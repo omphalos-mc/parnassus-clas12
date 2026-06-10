@@ -270,9 +270,7 @@ class PerformanceLogger(Callback):
         canvas = FigureCanvas(fig)
         canvas.draw()
         w, h = fig.get_size_inches() * fig.get_dpi()
-        image = np.frombuffer(canvas.tostring_rgb(), dtype="uint8").reshape(
-            int(h), int(w), 3
-        )
+        image = np.asarray(canvas.buffer_rgba())[..., :3]
         fig.subplots_adjust(hspace=0.3, wspace=0.3)
         plt.savefig(f"logs/figs/{plot_name}_{pl_module.current_epoch}.png")
         if pl_module.logger is not None:

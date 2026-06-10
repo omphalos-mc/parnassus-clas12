@@ -150,11 +150,11 @@ class CLI(LightningCLI):
             log_dir_timestamp = str(Path(log_dir / dirname).resolve())
             sc["trainer.default_root_dir"] = log_dir_timestamp
             if sc[log]:
-                sc[f"{log}.init_args.save_dir"] = log_dir_timestamp
-                sc[f"{log}.init_args.name"] = name
-                sc[f"{log}.init_args.experiment_key"] = os.environ.get(
-                    "COMET_EXP_ID", None
-                )
+                sc.trainer.logger.dict_kwargs = {
+                    "save_dir": log_dir_timestamp,
+                    "name": name,
+                    "experiment_key": os.environ.get("COMET_EXP_ID", None),
+                }
 
         if self.subcommand == "test":
             # Modify callbacks when testing

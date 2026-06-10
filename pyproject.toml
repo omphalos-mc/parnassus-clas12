@@ -25,7 +25,8 @@ dependencies = [
     "hdf5plugin",
     "lion-pytorch",
     "onnx",
-    "onnxruntime"
+    "onnxruntime",
+    "jsonargparse[signatures]",
 ]
 
 [build-system]
