@@ -1,9 +1,11 @@
+import pickle
 import numpy as np
 import torch
 import pytest
 import tempfile
 import os
 import yaml
+from sklearn.preprocessing import QuantileTransformer
 
 from parnassus_core.data.utils.scaling import (
     VarTransform,
@@ -75,7 +77,7 @@ class TestVarTransform:
     """Test suite for VarTransform class."""
 
     @pytest.mark.parametrize("transform_type", TRANSFORM_TYPES)
-    def test_init_transform_type(self, transform_type):
+    def test_init_transform_type(self, transform_type, tmp_path):
         """Test initialization with standard normalization type."""
         config = {
             "type": transform_type,
@@ -84,6 +86,13 @@ class TestVarTransform:
             "min": 0.0,
             "max": 2.0,
         }
+        if transform_type == "quantile":
+            quantile_transformer = QuantileTransformer(n_quantiles=4).fit(
+                np.arange(8, dtype=np.float64).reshape(-1, 1)
+            )
+            qt_path = tmp_path / "quantile.pkl"
+            qt_path.write_bytes(pickle.dumps(quantile_transformer))
+            config["qt_path"] = str(qt_path)
         transform = VarTransform("test_var", config)
 
         assert transform.name == "test_var"
@@ -98,6 +107,24 @@ class TestVarTransform:
             case "min_max_sym":
                 assert transform.shift == 1.0
                 assert transform.scale == 1.0
+            case "quantile":
+                assert transform.qt_path == str(qt_path)
+                assert isinstance(transform.qt, QuantileTransformer)
+
+    def test_quantile_transform_round_trip(self, tmp_path):
+        values = np.linspace(-3.0, 3.0, 16).reshape(-1, 1)
+        quantile_transformer = QuantileTransformer(n_quantiles=8).fit(values)
+        qt_path = tmp_path / "quantile.pkl"
+        qt_path.write_bytes(pickle.dumps(quantile_transformer))
+        transform = VarTransform(
+            "test_var",
+            {"type": "quantile", "qt_path": str(qt_path)},
+        )
+        inputs = torch.tensor([-2.5, -0.5, 1.5], dtype=torch.float64)
+
+        recovered = transform.inverse_transform(transform.transform(inputs))
+
+        torch.testing.assert_close(recovered, inputs)
 
     @pytest.mark.parametrize("fn", TRANSFORM_FUNCTIONS)
     def test_init_with_function(self, fn):
@@ -262,12 +289,47 @@ class TestFeatureScaler:
 class TestUnscaler:
     """Test suite for Unscaler class."""
 
+    def test_class_conditioned_scaling_and_identity_fallback(self, tmp_path):
+        config = {
+            "class_0": {
+                "eta": {"type": "std", "mean": 0.0, "std": 1.0},
+            },
+            "class_1": {
+                "eta": {"type": "std", "mean": 10.0, "std": 2.0},
+            },
+        }
+        config_path = tmp_path / "class_scaling.yaml"
+        config_path.write_text(yaml.safe_dump(config))
+        scaler = FeatureScaler(str(config_path), class_based_scaling=True)
+        particle_class = torch.tensor([0, 1, 2])
+        values = torch.tensor([0.0, 10.0, 5.0])
+
+        transformed = scaler.transform(
+            "eta",
+            values,
+            particle_class=particle_class,
+        )
+        recovered = scaler.inverse_transform(
+            "eta",
+            transformed,
+            particle_class=particle_class,
+        )
+        fallback = scaler.transform(
+            "phi",
+            values,
+            particle_class=particle_class,
+        )
+
+        torch.testing.assert_close(transformed, torch.tensor([0.0, 0.0, 5.0]))
+        torch.testing.assert_close(recovered, values)
+        torch.testing.assert_close(fallback, values)
+
     def test_init(self, temp_yaml_file):
         """Test Unscaler initialization."""
         feature_scaler = FeatureScaler(temp_yaml_file)
-        fs_vars = ["ptrel", "eta", "phi"]
+        fs_vars = ["pflow_ptrel", "pflow_eta", "pflow_phi"]
         ctxt_vars = ["truth_pt", "truth_eta"]
-        ctxt_global_vars = ["truth_ht", "ntruth_particles"]
+        ctxt_global_vars = ["truth_ht", "pflow_ht"]
 
         unscaler = Unscaler(
             feature_scaler=feature_scaler,
@@ -282,11 +344,15 @@ class TestUnscaler:
         assert unscaler.ctxt_vars == ctxt_vars
         assert unscaler.ctxt_global_vars == ctxt_global_vars
         assert unscaler.sin_cos is True
+        assert unscaler.target_collection == "pflow"
+        assert unscaler.ctxt_collection == "truth"
 
     def test_extract_var_simple(self, temp_yaml_file):
         """Test extract_var method with simple variable."""
         feature_scaler = FeatureScaler(temp_yaml_file)
-        unscaler = Unscaler(feature_scaler, [], [], [], sin_cos=False)
+        unscaler = Unscaler(
+            feature_scaler, ["pflow_eta"], ["truth_eta"], [], sin_cos=False
+        )
 
         # Test data with multiple features
         data = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
@@ -299,7 +365,9 @@ class TestUnscaler:
     def test_extract_var_phi_with_sin_cos(self, temp_yaml_file):
         """Test extract_var method with phi variable and sin_cos=True."""
         feature_scaler = FeatureScaler(temp_yaml_file)
-        unscaler = Unscaler(feature_scaler, [], [], [], sin_cos=True)
+        unscaler = Unscaler(
+            feature_scaler, ["pflow_phi"], ["truth_eta"], [], sin_cos=True
+        )
 
         # Create data where indices 0,1 are sin,cos of phi
         sin_phi = torch.tensor([[0.0, 1.0], [0.707, 0.707]])  # sin values
@@ -319,7 +387,9 @@ class TestUnscaler:
     def test_extract_var_class(self, temp_yaml_file):
         """Test extract_var method with class variable."""
         feature_scaler = FeatureScaler(temp_yaml_file)
-        unscaler = Unscaler(feature_scaler, [], [], [], sin_cos=False)
+        unscaler = Unscaler(
+            feature_scaler, ["pflow_class"], ["truth_eta"], [], sin_cos=False
+        )
 
         # Create one-hot encoded class data
         data = torch.tensor(
@@ -369,13 +439,15 @@ class TestUnscaler:
             "ctxt_global_data": ctxt_global_data,
         }
 
-        result = unscaler.unscale_variables(fs_data, ctxt_dict, target_data=pf_data)
+        result = unscaler.unscale_variables(
+            fs_data, ctxt_dict, target_data=pf_data, unshift=False
+        )
 
         # Check that result contains expected keys
         assert "fs_pt" in result
-        assert "tr_ht" in result
-        assert "tr_eta" in result
-        assert "pf_ht" in result
+        assert "truth_ht" in result
+        assert "truth_eta" in result
+        assert "pflow_ht" in result
 
         # Check that tensors are converted to numpy
         assert isinstance(result["fs_pt"], np.ndarray)
@@ -391,7 +463,7 @@ class TestUnscaler:
             expected_pf_pt = np.expm1(pf_data.numpy())[..., 0] * expected_pf_ht.reshape(
                 -1, 1
             )
-            np.testing.assert_allclose(result["pf_pt"], expected_pf_pt, rtol=1e-5)
+            np.testing.assert_allclose(result["pflow_pt"], expected_pf_pt, rtol=1e-5)
 
     def test_unscale_variables_means_handling(self, temp_yaml_file):
         """Test handling of 'means' in ctxt_global_vars."""
@@ -401,48 +473,55 @@ class TestUnscaler:
 
         unscaler = Unscaler(
             feature_scaler=feature_scaler,
-            fs_vars=[],
+            fs_vars=["pflow_eta"],
             ctxt_vars=ctxt_vars,
             ctxt_global_vars=ctxt_global_vars,
             sin_cos=False,
         )
 
-        fs_data = torch.tensor([[]])
+        fs_data = torch.zeros(1, 1, 1)
         ctxt_dict = {
             "ctxt_global_data": torch.tensor(
                 [[100.0, 200.0, 300.0]]
             ),  # means (skips 2), then truth_ht
             "ctxt_data": torch.tensor(
-                [[0.5, 1.0, 0.1, 0.2, 0.8, 0.1, 0.1]]
+                [[[0.5, 1.0, 0.1, 0.2, 0.8, 0.1, 0.1]]]
             ),  # ptrel, eta, class (5 values)
         }
 
-        result = unscaler.unscale_variables(fs_data, ctxt_dict)
+        result = unscaler.unscale_variables(fs_data, ctxt_dict, unshift=False)
 
         # Should have truth_ht but skip means processing
-        assert "tr_ht" in result
+        assert "truth_ht" in result
         assert "means" not in result
 
     @pytest.mark.parametrize("sin_cos", [True, False])
     def test_unscale_variables_sin_cos_parameter(self, temp_yaml_file, sin_cos):
         """Test unscale_variables with different sin_cos settings."""
         feature_scaler = FeatureScaler(temp_yaml_file)
-        fs_vars = ["phi"]
+        fs_vars = ["pflow_phi"]
 
         unscaler = Unscaler(
             feature_scaler=feature_scaler,
             fs_vars=fs_vars,
-            ctxt_vars=[],
+            ctxt_vars=["truth_eta"],
             ctxt_global_vars=[],
             sin_cos=sin_cos,
         )
 
         if sin_cos:
             # Need sin/cos data for phi
-            fs_data = torch.tensor([[0.707, 0.707]])  # sin, cos of π/4
+            fs_data = torch.tensor([[[0.707, 0.707]]])  # sin, cos of π/4
         else:
-            fs_data = torch.tensor([[1.57]])  # Direct phi value
+            fs_data = torch.tensor([[[1.57]]])  # Direct phi value
 
-        result = unscaler.unscale_variables(fs_data, {})
+        result = unscaler.unscale_variables(
+            fs_data,
+            {
+                "ctxt_data": torch.zeros(1, 1, 1),
+                "ctxt_global_data": torch.zeros(1, 0),
+            },
+            unshift=False,
+        )
 
         assert "fs_phi" in result

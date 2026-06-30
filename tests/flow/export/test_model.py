@@ -21,25 +21,18 @@ GLOBAL_DIM = 3
 
 
 class MockNet(nn.Module):
-    """Mock network for testing."""
-
     def __init__(self, fs_dim=FS_DIM, output_dim=FS_DIM):
         super().__init__()
         self.linear = nn.Linear(fs_dim, output_dim)
+        self.last_ctxt_dict = None
 
     def forward(self, fs_data, timestep, ctxt_dict):
-        # Simple mock forward pass
+        self.last_ctxt_dict = ctxt_dict
         output = self.linear(fs_data)
-        # Add timestep influence
         output = output + timestep.mean() * 0.1
         if fs_data.dim() == 3:
             output = output * ctxt_dict["fs_mask"].unsqueeze(-1)
-        return output
-
-
-@pytest.fixture(params=["event", "particle"])
-def model_type(request):
-    return request.param
+        return output, None
 
 
 @pytest.fixture
@@ -94,7 +87,6 @@ class TestExportModelWrapper:
         assert wrapper.model_type == model_type
 
     def test_forward_event(self, mock_net, input_data_event):
-        """Test forward pass for event model type."""
         wrapper = ExportModelWrapper(
             net=mock_net, dynamic_axes=EVENT_TORCH_DYNAMIC_AXES, model_type="event"
         ).to(DEVICE)
@@ -107,9 +99,10 @@ class TestExportModelWrapper:
         assert output.shape == fs_data.shape
         assert output.device == fs_data.device
         assert output.dtype == fs_data.dtype
+        torch.testing.assert_close(mock_net.last_ctxt_dict["ctxt_mask"], mask)
+        assert "fs_mask" not in mock_net.last_ctxt_dict
 
     def test_forward_particle(self, mock_net, input_data_particle):
-        """Test forward pass for event model type."""
         wrapper = ExportModelWrapper(
             net=mock_net,
             dynamic_axes=PARTICLE_TORCH_DYNAMIC_AXES,
@@ -125,3 +118,5 @@ class TestExportModelWrapper:
         assert output.device == fs_data.device
         assert output.dtype == fs_data.dtype
         assert torch.all(output[~mask[..., 1]] == 0)
+        torch.testing.assert_close(mock_net.last_ctxt_dict["ctxt_mask"], mask[..., 0])
+        torch.testing.assert_close(mock_net.last_ctxt_dict["fs_mask"], mask[..., 1])

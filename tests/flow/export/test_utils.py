@@ -15,6 +15,7 @@ from parnassus_core.flow.export.utils import (
     PARTICLE_ONNX_DYNAMIC_AXES,
     EVENT_TORCH_DYNAMIC_AXES,
     PARTICLE_TORCH_DYNAMIC_AXES,
+    prepare_data,
 )
 from parnassus_core.flow.export.model import ExportModelWrapper
 
@@ -54,7 +55,7 @@ class MockNet(nn.Module):
         output = output + timestep.mean() * 0.1
         if fs_data.dim() == 3:
             output = output * ctxt_dict["fs_mask"].unsqueeze(-1)
-        return output
+        return output, None
 
 
 class MockFlowLightning:
@@ -293,6 +294,28 @@ class TestExport:
             ):
                 export(mock_model, config, "torch", output_path, sample_batch_event)
 
+    def test_impact_export_does_not_mutate_shared_dynamic_axes(self):
+        mock_model = MockFlowLightning()
+        sample_batch = get_sample_batch("particle", impact=True)
+        original_keys = set(PARTICLE_TORCH_DYNAMIC_AXES)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "model.pt"
+            with (
+                patch("torch.export.export", return_value=Mock()),
+                patch("torch.export.save"),
+            ):
+                wrapper, _ = export(
+                    mock_model,
+                    get_config("particle"),
+                    "torch",
+                    output_path,
+                    sample_batch,
+                )
+
+        assert "pf_ctxt_data" in wrapper.dynamic_axes
+        assert set(PARTICLE_TORCH_DYNAMIC_AXES) == original_keys
+
 
 class TestValidate:
     """Test model validation functionality."""
@@ -471,3 +494,45 @@ class TestExportAndValidate:
             assert result is True
             mock_export.assert_called_once()
             assert mock_validate.call_count >= 3
+
+    @patch("parnassus_core.flow.export.utils.export")
+    @patch("parnassus_core.flow.export.utils.validate")
+    def test_export_and_validate_preserves_any_validation_failure(
+        self, mock_validate, mock_export, mock_config
+    ):
+        mock_export.return_value = (Mock(), Path("output.pt"))
+        expected_calls = 4 if torch.cuda.is_available() else 3
+        mock_validate.side_effect = [False] + [True] * (expected_calls - 1)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            result = export_and_validate(
+                MockFlowLightning(),
+                mock_config,
+                MockDataset(train_type="event"),
+                2,
+                "torch",
+                Path(tmp_dir) / "model.pt",
+            )
+
+        assert result is False
+        assert mock_validate.call_count == expected_calls
+
+
+def test_prepare_data_stacks_context_and_final_state_masks_in_export_order():
+    fs_data = torch.zeros(BS, SEQ_LEN, FS_DIM)
+    ctxt_mask = torch.tensor(
+        [[True, False] * (SEQ_LEN // 2), [False, True] * (SEQ_LEN // 2)]
+    )
+    fs_mask = ~ctxt_mask
+    ctxt_dict = {
+        "ctxt_mask": ctxt_mask,
+        "fs_mask": fs_mask,
+        "ctxt_data": torch.zeros(BS, SEQ_LEN, CTXT_DIM),
+        "ctxt_global_data": torch.zeros(BS, GLOBAL_DIM),
+    }
+
+    prepared = prepare_data(fs_data, ctxt_dict, mode="particle")
+
+    torch.testing.assert_close(prepared["mask"][..., 0], ctxt_mask)
+    torch.testing.assert_close(prepared["mask"][..., 1], fs_mask)
+    assert prepared["timestep"].shape == (BS, 1)

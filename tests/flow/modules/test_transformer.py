@@ -146,7 +146,7 @@ def test_dit_encoder(
         .half()
     )
     encoder.reset_parameters()
-    out_a, out_b = encoder(x_a, x_b, ctxt=ctxt, mask_a=mask_a, mask_b=mask_b)
+    out_a, out_b, _ = encoder(x_a, x_b, ctxt=ctxt, mask_a=mask_a, mask_b=mask_b)
     assert out_a.shape == x_a.shape
     assert out_b.shape == x_b.shape
     if not bidirectional:
@@ -177,13 +177,13 @@ def test_dit_encoder_change_backend(attn_type: str, attn_type_new: str):
         .half()
     )
     encoder.reset_parameters()
-    out_a1, out_b1 = encoder(x_a, x_b, ctxt=ctxt)
+    out_a1, out_b1, _ = encoder(x_a, x_b, ctxt=ctxt)
 
     encoder.set_backend(attn_type_new)
     assert encoder.attn_type == attn_type_new
     assert all(layer.attn_type == attn_type_new for layer in encoder.layers)
 
-    out_a2, out_b2 = encoder(x_a, x_b, ctxt=ctxt)
+    out_a2, out_b2, _ = encoder(x_a, x_b, ctxt=ctxt)
     assert out_a2.shape == out_a1.shape
     assert out_b2.shape == out_b1.shape
 

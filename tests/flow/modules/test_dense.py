@@ -35,6 +35,12 @@ class TestMLPBlock:
         assert not torch.isnan(output).any(), "Output contains NaN values"
         assert torch.isfinite(output).all(), "Output contains non-finite values"
 
+    def test_context_is_required_when_configured(self):
+        block = MLPBlock(input_dim=3, output_dim=4, ctxt_dim=2)
+
+        with pytest.raises(ValueError, match="expecting contextual information"):
+            block(torch.zeros(2, 3))
+
     @pytest.mark.parametrize("act", [None, "GELU"])
     def test_custom_parameters(
         self,
@@ -168,6 +174,18 @@ class TestDenseNetwork:
         assert "10(3)" in one_line  # Input with context
         assert "5" in one_line  # Output
 
+    def test_zero_initialized_output_layer_starts_as_zero_function(self):
+        network = DenseNetwork(
+            input_dim=3,
+            hidden_dim=5,
+            output_dim=2,
+            output_init_zeros=True,
+        )
+
+        output = network(torch.randn(4, 3))
+
+        torch.testing.assert_close(output, torch.zeros(4, 2))
+
 
 class TestConcatTensors:
     """Test suite for concat_tensors function."""
@@ -189,8 +207,7 @@ class TestConcatTensors:
         assert result.shape == expected_shape
 
     def test_empty_list(self):
-        """Test concatenation with empty list."""
-        with pytest.raises(RuntimeError):
+        with pytest.raises(ValueError, match="expected a non-empty list"):
             concat_tensors([])
 
     def test_different_batch_sizes_error(self):

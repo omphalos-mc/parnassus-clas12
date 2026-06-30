@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from typing import Literal
+from functools import partial
+from typing import Literal, cast
 from torch import Tensor
 import torch.nn as nn
 
@@ -106,28 +107,35 @@ class DiTLayer(nn.Module):
         mlp_ratio: float = 4.0,
         ctxt_ratio: float = 3.0,
         simplify: bool = False,
-        norm: Literal["rms", "layer"] = "rms",
+        norm: Literal["rms", "layer", "rms-free"] = "rms",
+        no_modulation: bool = False,
     ):
         super().__init__()
         self.simplify = simplify
+        self.no_modulation = no_modulation
         if norm == "layer":
             norm_layer = LayerNorm
+            self.norm_k = LayerNorm(hidden_dim)
         elif norm == "rms":
             norm_layer = RMSNorm
+            self.norm_k = RMSNorm(hidden_dim)
+        elif norm == "rms-free":
+            norm_layer = partial(RMSNorm, learnable=False)
+            self.norm_k = RMSNorm(hidden_dim)
         else:
             raise ValueError(
-                f"Unknown norm type: {norm}, onyr 'rms' and 'layer' are supported."
+                f"Unknown norm type: {norm}, only 'rms', 'layer', and 'rms-free' are supported."
             )
         self.norm1 = norm_layer(hidden_dim)
-        self.norm_k = norm_layer(hidden_dim)
         if not simplify:
             # self.norm2 = nn.LayerNorm(hidden_dim, elementwise_affine=False)
             self.norm2 = norm_layer(hidden_dim)
             mlp_hidden_dim = int(hidden_dim * mlp_ratio)
             self.mlp = GLU(hidden_dim, mlp_hidden_dim, bias=False, gated=True)
-        self.adaLN_modulation = Modulation(
-            hidden_dim, double=not simplify, ctxt_ratio=ctxt_ratio
-        )
+        if not no_modulation:
+            self.adaLN_modulation = Modulation(
+                hidden_dim, double=not simplify, ctxt_ratio=ctxt_ratio
+            )
         if mha_config is None:
             mha_config = {}
 
@@ -145,6 +153,22 @@ class DiTLayer(nn.Module):
         self.attn_type = attn_type
         return self.attn_type
 
+    def forward_no_modulation(
+        self,
+        seq_q: Tensor,
+        seq_k: Tensor,
+        mask_k: Tensor | BlockMask | None = None,
+    ):
+        seq_q = seq_q + self.attn(
+            q=self.norm1(seq_q),
+            kv=self.norm_k(seq_k),
+            kv_mask=mask_k if self.attn_type != "flex" else None,
+            attn_mask=mask_k if self.attn_type == "flex" else None,
+        )
+        if not self.simplify:
+            seq_q = seq_q + self.mlp(self.norm2(seq_q))
+        return seq_q
+
     def forward(
         self,
         seq_q: Tensor,
@@ -152,6 +176,9 @@ class DiTLayer(nn.Module):
         ctxt: Tensor,
         mask_k: Tensor | BlockMask | None = None,
     ):
+        if self.no_modulation:
+            return self.forward_no_modulation(seq_q, seq_k, mask_k)
+
         # Common stuff
         mod_mha, mod_mlp = self.adaLN_modulation(ctxt)
         seq_q_mod = mod_mha.modulate(self.norm1(seq_q))
@@ -175,7 +202,8 @@ class DiTLayer(nn.Module):
         return seq_q
 
     def reset_parameters(self):
-        self.adaLN_modulation.reset_parameters()
+        if not self.no_modulation:
+            self.adaLN_modulation.reset_parameters()
 
 
 class SADiTLayer(DiTLayer):
@@ -207,11 +235,13 @@ class DiTBlock(nn.Module):
         bidirectional=False,
         do_selfattn=False,
         simplify=False,
-        norm: Literal["rms", "layer"] = "rms",
+        norm: Literal["rms", "layer", "rms-free"] = "rms",
+        no_modulation=False,
     ):
         super().__init__()
         self.bidirectional = bidirectional
         self.do_selfattn = do_selfattn
+        self.no_modulation = no_modulation
 
         kwargs = {
             "hidden_dim": hidden_dim,
@@ -221,6 +251,7 @@ class DiTBlock(nn.Module):
             "ctxt_ratio": ctxt_ratio,
             "simplify": simplify,
             "norm": norm,
+            "no_modulation": no_modulation,
         }
 
         if do_selfattn:
@@ -336,15 +367,16 @@ class DiTEncoder(nn.Module):
         hidden_dim: int,
         num_heads: int,
         num_layers: int,
-        mha_config: dict = None,
+        mha_config: dict | None = None,
         mlp_ratio: float = 4.0,
         ctxt_ratio: float = 3.0,
         attn_type: str = "torch",
         do_selfattn: bool = False,
         bidirectional: bool = True,
         simplify: bool = False,
-        norm: Literal["rms", "layer"] = "rms",
+        norm: Literal["rms", "layer", "rms-free"] = "rms",
         intermediate_idx_to_return: int = -1,
+        no_modulation: bool = False,
     ):
         super().__init__()
         self.attn_type = attn_type
@@ -354,6 +386,7 @@ class DiTEncoder(nn.Module):
         self.do_selfattn = do_selfattn
         self.bidirectional = bidirectional
         self.simplify = simplify
+        self.no_modulation = no_modulation
 
         # For returning intermediate layer outputs
         self.return_intermediate = intermediate_idx_to_return >= 0
@@ -374,16 +407,19 @@ class DiTEncoder(nn.Module):
                     do_selfattn=do_selfattn,
                     simplify=simplify,
                     norm=norm,
+                    no_modulation=no_modulation,
                 )
                 for i in range(num_layers)
             ]
         )
         self.set_backend(attn_type)
+        # RESET PARAMETERS
+        self.reset_parameters()
 
     def set_backend(self, attn_type: str):
         self.attn_type = attn_type
-        layer: DiTBlock
         for layer in self.layers:
+            layer = cast(DiTBlock, layer)
             self.attn_type = layer.set_backend(self.attn_type)
         return self.attn_type
 
@@ -395,10 +431,6 @@ class DiTEncoder(nn.Module):
         mask_a: Tensor | BlockMask | None = None,
         mask_b: Tensor | BlockMask | None = None,
     ):
-        if self.attn_type == "flex":
-            assert seq_a.size(1) == seq_b.size(1), (
-                "For flex attention, sequences must be of equal length."
-            )
         intermediate_output = None
         for i, layer in enumerate(self.layers):
             seq_a, seq_b = layer(seq_a, seq_b, ctxt, mask_a, mask_b)
@@ -408,4 +440,5 @@ class DiTEncoder(nn.Module):
 
     def reset_parameters(self):
         for layer in self.layers:
+            layer = cast(DiTBlock, layer)
             layer.reset_parameters()

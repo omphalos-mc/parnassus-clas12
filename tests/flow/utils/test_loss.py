@@ -52,6 +52,17 @@ class TestMSELoss:
         )
         torch.testing.assert_close(loss, expected_loss)
 
+    def test_feature_weights_and_mask_use_only_valid_elements(self):
+        pred = torch.tensor([[[1.0, 2.0], [100.0, 100.0]]])
+        target = torch.zeros_like(pred)
+        mask = torch.tensor([[True, False]])
+        criterion = MSELoss(reduction="mean", loss_weights=[1.0, 3.0])
+
+        loss = criterion(pred, target, mask)
+
+        expected = (1.0**2 * 1.0 + 2.0**2 * 3.0) / 2
+        torch.testing.assert_close(loss, torch.tensor(expected))
+
 
 class TestMSEAndDirectionLoss:
     def test_wrong_reduction(self):
@@ -94,3 +105,15 @@ def test_set2set_loss(input_data):
 
     criterion = Set2SetLoss().to(DEVICE)
     _ = criterion(pred, target, mask)
+
+
+def test_set2set_loss_is_zero_for_permuted_identical_sets():
+    target = torch.tensor([[[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]]])
+    prediction = target.flip(1)
+    mask = torch.ones(1, 2, dtype=torch.bool)
+
+    losses = Set2SetLoss()(prediction, target, mask)
+
+    assert set(losses) == {"total_loss", "pt_loss", "eta_loss", "phi_loss"}
+    for loss in losses.values():
+        torch.testing.assert_close(loss, torch.tensor(0.0))

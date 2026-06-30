@@ -65,6 +65,11 @@ class CLI(LightningCLI):
         parser.link_arguments(
             "trainer.default_root_dir", "trainer.logger.init_args.save_dir"
         )
+        parser.add_argument(
+            "--matmul_precision",
+            default="highest",
+            help="Precision for matmul operations.",
+        )
 
     def _rsync_to_temp(self, source_path: str, temp_dir: str) -> str:
         """Rsync a file to the temporary directory and return the new path."""
@@ -94,6 +99,10 @@ class CLI(LightningCLI):
 
     def before_instantiate_classes(self) -> None:
         sc = self.config[self.subcommand]
+
+        if sc.get("matmul_precision") is not None:
+            print(f"Setting matmul precision to {sc['matmul_precision']} for this run.")
+            torch.set_float32_matmul_precision(sc["matmul_precision"])
 
         # Handle rsync of data files to temp directory before instantiation
         move_files_temp = sc.get("move_files_temp")

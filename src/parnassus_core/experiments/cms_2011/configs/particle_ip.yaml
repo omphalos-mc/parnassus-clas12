@@ -45,7 +45,6 @@ model:
   fm:
     class_path: parnassus_core.flow.utils.FlowMatcher
     init_args:
-      sigma: 0.0
       flow_type: rcfm
 
   sampler_type: dpm

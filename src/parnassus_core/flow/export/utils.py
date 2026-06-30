@@ -115,17 +115,18 @@ def export(
 
     match model_type := config["data"]["train_type"]:
         case "event":
-            dynamic_axes = (
+            base_dynamic_axes = (
                 EVENT_ONNX_DYNAMIC_AXES if mode == "onnx" else EVENT_TORCH_DYNAMIC_AXES
             )
         case "particle":
-            dynamic_axes = (
+            base_dynamic_axes = (
                 PARTICLE_ONNX_DYNAMIC_AXES
                 if mode == "onnx"
                 else PARTICLE_TORCH_DYNAMIC_AXES
             )
         case _:
             raise ValueError(f"Unknown data type: {config['data']['train_type']}")
+    dynamic_axes = base_dynamic_axes.copy()
 
     use_pf_ctxt = False
     if "pf_ctxt_data" in sample_batch:
@@ -295,7 +296,7 @@ def export_and_validate(
     # Validate the exported model
     print("Validating the exported model...")
     print("Single batch validation:")
-    is_valid = validate(model_wrapper, outpath, sample_batch, mode=mode)
+    is_valid = validate(model_wrapper, outpath, sample_batch, mode=mode) and is_valid
 
     print("Multiple batch validation:")
     batches = []
@@ -305,12 +306,15 @@ def export_and_validate(
         batch = prepare_data(fs_data, ctxt_dict, mode=dataset.train_type)
         batches.append(batch)
 
-    is_valid = validate(model_wrapper, outpath, batches, mode=mode)
+    is_valid = validate(model_wrapper, outpath, batches, mode=mode) and is_valid
 
     if torch.cuda.is_available() and mode == "torch":
         print("Multiple batch CUDA validation:")
-        is_valid = validate(
-            model_wrapper, outpath, batches, mode=mode, device=torch.device("cuda")
+        is_valid = (
+            validate(
+                model_wrapper, outpath, batches, mode=mode, device=torch.device("cuda")
+            )
+            and is_valid
         )
 
     print("Different batch size validation:")
@@ -320,5 +324,7 @@ def export_and_validate(
         shuffle=False,
     )
     sample_batch_bs2 = prepare_data(*(next(iter(dl_bs2))), mode=dataset.train_type)
-    is_valid = validate(model_wrapper, outpath, sample_batch_bs2, mode=mode)
+    is_valid = (
+        validate(model_wrapper, outpath, sample_batch_bs2, mode=mode) and is_valid
+    )
     return is_valid

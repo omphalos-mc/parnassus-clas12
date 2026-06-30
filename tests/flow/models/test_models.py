@@ -159,8 +159,9 @@ class TestEventNetwork:
     @pytest.mark.parametrize("input_data", ["event"], indirect=True)
     def test_evt_network(self, input_data, event_network):
         fs_data, timestep, ctxt_dict = input_data
-        output = event_network(fs_data, timestep, ctxt_dict)
+        output, guidance = event_network(fs_data, timestep, ctxt_dict)
         assert output.shape == fs_data.shape
+        assert guidance is None
 
 
 class TestParticleNetwork:
@@ -187,6 +188,32 @@ class TestParticleNetwork:
             .half()
         )
 
+    @pytest.fixture
+    def particle_network_ctxt_as_token(
+        self,
+        time_embedder,
+        fs_init_net,
+        ctxt_networks,
+        global_embedding,
+        transformer_encoder,
+        fs_out_net,
+    ):
+        return (
+            ParticleNetwork(
+                time_embedding=time_embedder,
+                fs_init_net=fs_init_net,
+                ctxt_networks=ctxt_networks,
+                global_embedding=global_embedding,
+                encoder=transformer_encoder,
+                fs_out_net=fs_out_net,
+                ctxt_as_token=True,
+                num_time_tokens=2,
+                num_ctxt_tokens=3,
+            )
+            .to(DEVICE)
+            .half()
+        )
+
     @pytest.mark.parametrize("input_data", ["particle"], indirect=True)
     def test_particle_network(
         self,
@@ -194,8 +221,63 @@ class TestParticleNetwork:
         particle_network,
     ):
         fs_data, timestep, ctxt_dict = input_data
-        output = particle_network(fs_data, timestep, ctxt_dict)
+        output, guidance = particle_network(fs_data, timestep, ctxt_dict)
         assert output.shape == fs_data.shape
+        assert guidance is None
+
+    @pytest.mark.parametrize("input_data", ["particle"], indirect=True)
+    @pytest.mark.parametrize("attn_type", ["torch", "flex"])
+    def test_particle_network_ctxt_as_token(
+        self,
+        input_data,
+        attn_type,
+        particle_network_ctxt_as_token,
+    ):
+        if not HAS_GPU and attn_type in ATTN_TYPES_GPU:
+            pytest.skip("Skipping GPU-specific test on CPU-only environment")
+        fs_data, timestep, ctxt_dict = input_data
+        particle_network_ctxt_as_token.change_backend(attn_type)
+        output, guidance = particle_network_ctxt_as_token(fs_data, timestep, ctxt_dict)
+        assert output.shape == fs_data.shape
+        assert guidance is None
+
+    @pytest.mark.parametrize("input_data", ["particle"], indirect=True)
+    def test_append_tokens_to_ctxt_seq(
+        self,
+        input_data,
+        particle_network_ctxt_as_token,
+    ):
+        _, timestep, ctxt_dict = input_data
+        ctxt_embd_dict = {}
+        for ctxt_net in particle_network_ctxt_as_token.ctxt_networks:
+            ctxt_embd_dict[ctxt_net.input_name + "_embd"] = ctxt_net(ctxt_dict)
+        ctxt_embd_dict["time_embd"] = particle_network_ctxt_as_token.time_embedding(
+            timestep
+        )
+        ctxt_seq = ctxt_embd_dict["ctxt_embd"]
+        ctxt_mask = ctxt_dict["ctxt_mask"]
+
+        ctxt_seq_with_tokens, ctxt_mask_with_tokens = (
+            particle_network_ctxt_as_token.append_tokens_to_ctxt_seq(
+                ctxt_seq=ctxt_seq,
+                ctxt_embd_dict=ctxt_embd_dict,
+                ctxt_mask=ctxt_mask,
+            )
+        )
+
+        total_tokens = particle_network_ctxt_as_token.total_tokens
+        assert ctxt_seq_with_tokens.shape == (
+            ctxt_seq.size(0),
+            ctxt_seq.size(1) + total_tokens,
+            ctxt_seq.size(2),
+        )
+        assert ctxt_mask_with_tokens.shape == (
+            ctxt_mask.size(0),
+            ctxt_mask.size(1) + total_tokens,
+        )
+        assert torch.all(ctxt_mask_with_tokens[:, :total_tokens])
+        torch.testing.assert_close(ctxt_mask_with_tokens[:, total_tokens:], ctxt_mask)
+        torch.testing.assert_close(ctxt_seq_with_tokens[:, total_tokens:], ctxt_seq)
 
     @pytest.mark.parametrize("input_data", ["particle"], indirect=True)
     @pytest.mark.parametrize("attn_type", ["torch", "flex", "flash-varlen"])
@@ -213,11 +295,11 @@ class TestParticleNetwork:
             pytest.skip("Skipping GPU-specific test on CPU-only environment")
         fs_data, timestep, ctxt_dict = input_data
         particle_network.change_backend(attn_type)
-        output = particle_network(fs_data, timestep, ctxt_dict)
+        output, _ = particle_network(fs_data, timestep, ctxt_dict)
         assert output.shape == fs_data.shape
 
         particle_network.change_backend(attn_type_new)
-        output_new = particle_network(fs_data, timestep, ctxt_dict)
+        output_new, _ = particle_network(fs_data, timestep, ctxt_dict)
         assert output_new.shape == fs_data.shape
 
         assert torch.allclose(output, output_new, atol=1e-3, rtol=1e-3)
@@ -235,12 +317,13 @@ class TestParticleNetwork:
         fs_data, timestep, ctxt_dict = input_data
         fs_mask = ctxt_dict["fs_mask"]
         particle_network.change_backend(attn_type)
-        output = particle_network(fs_data, timestep, ctxt_dict)
+        output, _ = particle_network(fs_data, timestep, ctxt_dict)
         assert output.shape == fs_data.shape
 
-        fs_data[~fs_mask] *= 1e3
+        perturbed = fs_data.clone()
+        perturbed[~fs_mask] *= 1e3
 
-        output_new = particle_network(fs_data, timestep, ctxt_dict)
+        output_new, _ = particle_network(perturbed, timestep, ctxt_dict)
         assert output_new.shape == fs_data.shape
 
         assert torch.allclose(
@@ -284,8 +367,9 @@ class TestImpactNetwork:
         impact_network,
     ):
         fs_data, timestep, ctxt_dict = input_data
-        output = impact_network(fs_data, timestep, ctxt_dict)
+        output, guidance = impact_network(fs_data, timestep, ctxt_dict)
         assert output.shape == fs_data.shape
+        assert guidance is None
 
     @pytest.mark.parametrize("input_data", ["particle"], indirect=True)
     @pytest.mark.parametrize("attn_type", ["torch", "flex", "flash-varlen"])
@@ -303,11 +387,11 @@ class TestImpactNetwork:
             pytest.skip("Skipping GPU-specific test on CPU-only environment")
         fs_data, timestep, ctxt_dict = input_data
         impact_network.change_backend(attn_type)
-        output = impact_network(fs_data, timestep, ctxt_dict)
+        output, _ = impact_network(fs_data, timestep, ctxt_dict)
         assert output.shape == fs_data.shape
 
         impact_network.change_backend(attn_type_new)
-        output_new = impact_network(fs_data, timestep, ctxt_dict)
+        output_new, _ = impact_network(fs_data, timestep, ctxt_dict)
         assert output_new.shape == fs_data.shape
 
         assert torch.allclose(output, output_new, atol=1e-3, rtol=1e-3)
@@ -325,12 +409,13 @@ class TestImpactNetwork:
         fs_data, timestep, ctxt_dict = input_data
         fs_mask = ctxt_dict["fs_mask"]
         impact_network.change_backend(attn_type)
-        output = impact_network(fs_data, timestep, ctxt_dict)
+        output, _ = impact_network(fs_data, timestep, ctxt_dict)
         assert output.shape == fs_data.shape
 
-        fs_data[~fs_mask] *= 1e3
+        perturbed = fs_data.clone()
+        perturbed[~fs_mask] *= 1e3
 
-        output_new = impact_network(fs_data, timestep, ctxt_dict)
+        output_new, _ = impact_network(perturbed, timestep, ctxt_dict)
         assert output_new.shape == fs_data.shape
 
         assert torch.allclose(

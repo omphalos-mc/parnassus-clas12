@@ -112,6 +112,17 @@ class TestPositionalEmbedding:
         assert "dropout=0.2" in repr_str
         assert "max_len=2000" in repr_str
 
+    def test_zero_input_returns_registered_positional_encoding(self):
+        embedding = PositionalEmbedding(d_model=4, dropout=0.0, max_len=3)
+        inputs = torch.zeros(2, 3, 4)
+
+        output = embedding(inputs)
+
+        torch.testing.assert_close(
+            output,
+            embedding.pe.unsqueeze(0).expand(2, -1, -1),
+        )
+
 
 class TestTimestepEmbedder:
     """Test suite for TimestepEmbedder class."""
@@ -212,6 +223,18 @@ class TestGlobalContextEmbedding:
         assert torch.all(output == 0), "Output should be zero when mask is all zeros"
         assert not torch.isnan(output).any(), "Output contains NaN values"
         assert torch.isfinite(output).all(), "Output contains non-finite values"
+
+    def test_masked_sequence_embedding_is_mean_over_valid_entries(self):
+        embedding = GlobalContextEmbedding(["track"])
+        track = torch.tensor([[[1.0, 3.0], [5.0, 7.0], [100.0, 100.0]]])
+        mask = torch.tensor([[True, True, False]])
+
+        output = embedding(
+            {"track_embd": track},
+            {"track_mask": mask},
+        )
+
+        torch.testing.assert_close(output, torch.tensor([[3.0, 5.0]]))
 
     def test_repr(self):
         """Test string representation."""

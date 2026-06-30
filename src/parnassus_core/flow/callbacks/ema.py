@@ -40,6 +40,7 @@ class EMA(Callback):
         every_n_steps: Apply EMA every N steps.
         cpu_offload: Offload weights to CPU.
         ema_start_step: Step at which to start EMA updates. Before this step, no EMA is computed.
+        pct_start: If provided, overrides ema_start_step and sets it to `pct_start` percentage of the total training steps.
     """
 
     def __init__(
@@ -49,6 +50,7 @@ class EMA(Callback):
         every_n_steps: int = 1,
         cpu_offload: bool = False,
         ema_start_step: int = 0,
+        pct_start: float | None = None,
     ):
         if not (0 <= decay <= 1):
             raise MisconfigurationException("EMA decay value must be between 0 and 1")
@@ -57,11 +59,18 @@ class EMA(Callback):
         self.every_n_steps = every_n_steps
         self.cpu_offload = cpu_offload
         self.ema_start_step = ema_start_step
+        self.pct_start = pct_start
 
     def on_fit_start(
         self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
     ) -> None:
         device = pl_module.device if not self.cpu_offload else torch.device("cpu")
+        if self.pct_start is not None:
+            total_steps = trainer.estimated_stepping_batches
+            self.ema_start_step = int(total_steps * self.pct_start)
+            rank_zero_info(
+                f"Setting ema_start_step to {self.ema_start_step} (which is {self.pct_start * 100}% of estimated total steps {total_steps})"
+            )
         trainer.optimizers = [
             optim
             if isinstance(optim, EMAOptimizer)

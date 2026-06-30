@@ -51,8 +51,7 @@ model:
   fm:
     class_path: parnassus_core.flow.utils.FlowMatcher
     init_args:
-      sigma: 0.0001
-      flow_type: fm
+      flow_type: icfm
       time_distribution: pow
 
   sampler_type: pndm

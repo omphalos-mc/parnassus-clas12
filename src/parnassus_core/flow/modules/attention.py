@@ -267,8 +267,8 @@ class Attention(nn.Module):
         q: Tensor,
         k: Tensor,
         v: Tensor,
-        q_mask: BoolTensor | None = None,
-        kv_mask: BoolTensor | None = None,
+        q_mask: BoolTensor | Tensor | None = None,
+        kv_mask: BoolTensor | Tensor | None = None,
     ) -> Tensor:
         # TODO: Implement a packed version for the self attention case
         bs, seqlen = q.shape[0], q.shape[1]
@@ -280,16 +280,17 @@ class Attention(nn.Module):
         q_flat, indices_q, cu_seqlens_q, max_seqlen_q, _ = unpad_input(q, q_mask.int())
         k_flat, _, cu_seqlens_k, max_seqlen_k, _ = unpad_input(k, kv_mask.int())
         v_flat, _, _, _, _ = unpad_input(v, kv_mask.int())
-
+        original_dtype = q.dtype
+        attn_dtype = torch.bfloat16
         out = self.attn(
-            q_flat,
-            k_flat,
-            v_flat,
+            q_flat.to(attn_dtype),
+            k_flat.to(attn_dtype),
+            v_flat.to(attn_dtype),
             cu_seqlens_q,
             cu_seqlens_k,
             max_seqlen_q,
             max_seqlen_k,
-        )
+        ).to(original_dtype)
 
         # Redo padding
         out = pad_input(out, indices_q, bs, seqlen=seqlen)

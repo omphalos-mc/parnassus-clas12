@@ -3,19 +3,23 @@ from typing import final
 import torch
 from tqdm import tqdm
 
+from parnassus_core.flow.utils.prediction import FlowPrediction
+
 # Taken from https://github.com/NVlabs/Sana/tree/main
 
 
 class NoiseScheduleFlow:
     def __init__(
         self,
+        prediction: FlowPrediction,
         schedule="discrete_flow",
     ):
         """Create a wrapper class for the forward SDE (EDM type)."""
-        self.T = 1
-        self.t0 = 0.001
-        self.schedule = schedule  # ['continuous', 'discrete_flow']
         self.total_N = 1000
+        self.T = 1 - 1 / self.total_N
+        self.t0 = 1 / self.total_N
+        self.schedule = schedule  # ['continuous', 'discrete_flow']
+        self.prediction = prediction
 
     def marginal_log_mean_coeff(self, t):
         """
@@ -27,14 +31,15 @@ class NoiseScheduleFlow:
         """
         Compute alpha_t of a given continuous-time label t in [0, T].
         """
-        return 1 - t
+        model_t = self.prediction.model_time(t)
+        return self.prediction.path.coefficients(model_t, model_t).sigma
 
-    @staticmethod
-    def marginal_std(t):
+    def marginal_std(self, t):
         """
         Compute sigma_t of a given continuous-time label t in [0, T].
         """
-        return t
+        model_t = self.prediction.model_time(t)
+        return self.prediction.path.coefficients(model_t, model_t).alpha
 
     def marginal_lambda(self, t):
         """
@@ -44,26 +49,18 @@ class NoiseScheduleFlow:
         log_std = torch.log(self.marginal_std(t))
         return log_mean_coeff - log_std
 
-    @staticmethod
-    def inverse_lambda(lamb):
+    def inverse_lambda(self, lamb):
         """
         Compute the continuous-time label t in [0, T] of a given half-logSNR lambda_t.
         """
-        # return torch.exp(-lamb)
-        return 1 / (torch.exp(lamb) + 1)
-
-    def edm_sigma(self, t):
-        return self.marginal_std(t) / self.marginal_alpha(t)
-
-    def edm_inverse_sigma(self, edmsigma):
-        sigma = edmsigma
-        lambda_t = torch.log(1 / sigma)
-        t = self.inverse_lambda(lambda_t)
-        return t
-
-
-def get_noise_from_velocity(velocity, x, t):
-    return (1 - t) * velocity - x
+        low = torch.full_like(lamb, self.t0)
+        high = torch.full_like(lamb, self.T)
+        for _ in range(64):
+            mid = (low + high) / 2
+            move_right = self.marginal_lambda(mid) > lamb
+            low = torch.where(move_right, mid, low)
+            high = torch.where(move_right, high, mid)
+        return (low + high) / 2
 
 
 def expand_dims(v, dims):
@@ -84,30 +81,24 @@ class DPM_Solver:
     def __init__(
         self,
         model_fn,
+        prediction: FlowPrediction,
     ):
         """Construct a DPM-Solver."""
-        self.model = lambda x, timestep, ctxt_dict: model_fn(
-            x, timestep.expand(x.shape[0]), ctxt_dict
-        )
-        self.noise_schedule = NoiseScheduleFlow()
-
-    def noise_prediction_fn(self, x, t, ctxt_dict):
-        """
-        Return the noise prediction model.
-        """
-        return self.model(x, timestep=t, ctxt_dict=ctxt_dict)
+        self.model = model_fn
+        self.prediction = prediction
+        self.noise_schedule = NoiseScheduleFlow(prediction)
 
     def data_prediction_fn(self, x, t, ctxt_dict):
         """
         Return the data prediction model (with corrector).
         """
-        noise = self.noise_prediction_fn(x, t, ctxt_dict)
-        alpha_t, sigma_t = (
-            self.noise_schedule.marginal_alpha(t),
-            self.noise_schedule.marginal_std(t),
+        model_t = self.prediction.model_time(t)
+        model_out = self.model(
+            x,
+            model_t.expand(x.shape[0]),
+            ctxt_dict,
         )
-        x0 = (x - sigma_t * noise) / alpha_t
-        return x0
+        return self.prediction.to_data(x, model_out, model_t)
 
     def model_fn(self, x, t, ctxt_dict):
         """
@@ -130,10 +121,8 @@ class DPM_Solver:
         Returns:
             A pytorch tensor of the time steps, with the shape (N + 1,).
         """
-        betas = torch.linspace(t_T, t_0, N + 1).to(device)
-        sigmas = 1.0 - betas
-        sigmas = (shift * sigmas / (1 + (shift - 1) * sigmas)).flip(dims=[0])
-        return sigmas
+        timesteps = torch.linspace(t_T, t_0, N + 1, device=device)
+        return shift * timesteps / (1 + (shift - 1) * timesteps)
 
     def denoise_to_zero_fn(self, x, s, ctxt_dict):
         """
@@ -322,9 +311,9 @@ class DPM_Solver:
     @torch.inference_mode()
     def sample(
         self,
-        x,
+        target_shape,
         ctxt_dict,
-        steps=20,
+        n_steps=20,
         t_start=None,
         t_end=None,
         order=2,
@@ -332,15 +321,16 @@ class DPM_Solver:
         denoise_to_zero=False,
         return_intermediate=False,
         flow_shift=1.0,
+        to_cpu=True,
     ):
         """
         Compute the sample at time `t_end` by DPM-Solver, given the initial `x` at time `t_start`.
 
         =====================================================
         Args:
-            x: A pytorch tensor. The initial value at time `t_start`
-                e.g. if `t_start` == T, then `x` is a sample from the standard normal distribution.
-            steps: A `int`. The total number of function evaluations (NFE).
+            target_shape: The shape of the target tensor.
+            ctxt_dict: A dictionary containing context data.
+            n_steps: A `int`. The total number of function evaluations (NFE).
             t_start: A `float`. The starting time of the sampling.
                 If `T` is None, we use self.noise_schedule.T (default is 1.0).
             t_end: A `float`. The ending time of the sampling.
@@ -366,6 +356,7 @@ class DPM_Solver:
                 (especially for steps <= 10). So we recommend to set it to be `True`.
             return_intermediate: A `bool`. Whether to save the xt at each step.
                 When set to `True`, method returns a tuple (x0, intermediates); when set to False, method returns only x0.
+            to_cpu: A `bool`. Whether to move the output to CPU. Default is `True`.
         Returns:
             x_end: A pytorch tensor. The approximated solution at time `t_end`.
 
@@ -373,20 +364,25 @@ class DPM_Solver:
         t_0 = self.noise_schedule.t0 if t_end is None else t_end
         t_T = self.noise_schedule.T if t_start is None else t_start
         assert t_0 > 0 and t_T > 0, (
-            "Time range needs to be greater than 0. For discrete-time DPMs, it needs to be in [1 / N, 1], where N is the length of betas array"
+            "Time range must be positive and lie within the configured schedule"
+        )
+        x = torch.randn(
+            target_shape,
+            device=ctxt_dict["ctxt_data"].device,
+            dtype=ctxt_dict["ctxt_data"].dtype,
         )
         device = x.device
         intermediates = []
         with torch.no_grad():
-            assert steps >= order
+            assert n_steps >= order
             timesteps = self.get_time_steps(
                 t_T=t_T,
                 t_0=t_0,
-                N=steps,
+                N=n_steps,
                 device=device,
                 shift=flow_shift,
             )
-            assert timesteps.shape[0] - 1 == steps
+            assert timesteps.shape[0] - 1 == n_steps
             # Init the initial values.
             step = 0
             t = timesteps[step]
@@ -410,12 +406,12 @@ class DPM_Solver:
                 t_prev_list.append(t)
                 model_prev_list.append(self.model_fn(x, t, ctxt_dict))
             # Compute the remaining values by `order`-th order multistep DPM-Solver.
-            for step in tqdm(range(order, steps + 1)):
+            for step in tqdm(range(order, n_steps + 1)):
                 t = timesteps[step]
                 # We only use lower order for steps < 10
                 # if lower_order_final and steps < 10:
                 if lower_order_final:  # recommended by Shuchen Xue
-                    step_order = min(order, steps + 1 - step)
+                    step_order = min(order, n_steps + 1 - step)
                 else:
                     step_order = order
                 x = self.multistep_dpm_solver_update(
@@ -433,13 +429,15 @@ class DPM_Solver:
                     model_prev_list[i] = model_prev_list[i + 1]
                 t_prev_list[-1] = t
                 # We do not need to evaluate the final model value.
-                if step < steps:
+                if step < n_steps:
                     model_prev_list[-1] = self.model_fn(x, t, ctxt_dict)
             if denoise_to_zero:
                 t = torch.ones((1,)).to(device) * t_0
                 x = self.denoise_to_zero_fn(x, t, ctxt_dict)
                 if return_intermediate:
                     intermediates.append(x.cpu())
+        if to_cpu:
+            x = x.cpu()
         if return_intermediate:
             return x, torch.stack(intermediates, dim=0)
         else:

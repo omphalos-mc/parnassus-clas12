@@ -31,15 +31,17 @@ class LayerNorm(nn.Module):
 
 
 class RMSNorm(torch.nn.Module):
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, learnable: bool = True):
         super().__init__()
-        self.scale = nn.Parameter(torch.ones(dim))
+        self.scale = (
+            nn.Parameter(torch.ones(dim)) if learnable else nn.Buffer(torch.ones(dim))
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_dtype = x.dtype
         x = x.float()
         rrms = torch.rsqrt(torch.mean(x**2, dim=-1, keepdim=True) + 1e-6)
-        return (x * rrms).to(dtype=x_dtype) * self.scale
+        return (x * rrms * self.scale).to(dtype=x_dtype)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(dim={self.scale.shape[0]})"
