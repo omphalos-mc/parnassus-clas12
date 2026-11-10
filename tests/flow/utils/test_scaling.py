@@ -525,3 +525,58 @@ class TestUnscaler:
         )
 
         assert "fs_phi" in result
+
+    def test_unshift_raw_vz_needs_no_pv_coords(self, temp_yaml_file):
+        """Raw vz passes through the default unshift path without pv_coords."""
+        unscaler = Unscaler(
+            FeatureScaler(temp_yaml_file), ["pflow_vz"], ["truth_vz"], []
+        )
+        fs_data = torch.randn(2, 3, 1)
+        ctxt_dict = {
+            "ctxt_data": torch.randn(2, 3, 1),
+            "ctxt_global_data": torch.zeros(2, 0),
+        }
+
+        result = unscaler.unscale_variables(fs_data, ctxt_dict)
+
+        np.testing.assert_allclose(result["fs_vz"], fs_data[..., 0].numpy())
+        np.testing.assert_allclose(
+            result["truth_vz"], ctxt_dict["ctxt_data"][..., 0].numpy()
+        )
+
+    def test_unshift_vz_shifted_adds_pv_z(self, temp_yaml_file):
+        """vz_shifted is unshifted to vz by adding the per-event pv_z."""
+        unscaler = Unscaler(
+            FeatureScaler(temp_yaml_file),
+            ["pflow_vz_shifted"],
+            ["truth_vz_shifted"],
+            [],
+        )
+        fs_data = torch.randn(2, 3, 1)
+        pv_coords = torch.tensor([[0.0, 0.0, 1.5], [0.0, 0.0, -2.0]])
+        ctxt_dict = {
+            "ctxt_data": torch.randn(2, 3, 1),
+            "ctxt_global_data": torch.zeros(2, 0),
+            "pv_coords": pv_coords,
+        }
+
+        result = unscaler.unscale_variables(fs_data, ctxt_dict)
+
+        pv_z = pv_coords[:, 2:].numpy()
+        np.testing.assert_allclose(result["fs_vz"], fs_data[..., 0].numpy() + pv_z)
+        np.testing.assert_allclose(
+            result["truth_vz"], ctxt_dict["ctxt_data"][..., 0].numpy() + pv_z
+        )
+
+    def test_unshift_vz_shifted_without_pv_coords_raises(self, temp_yaml_file):
+        """Unshifting vz_shifted without pv_coords names the missing input."""
+        unscaler = Unscaler(
+            FeatureScaler(temp_yaml_file), ["pflow_vz_shifted"], ["truth_eta"], []
+        )
+        ctxt_dict = {
+            "ctxt_data": torch.zeros(1, 1, 1),
+            "ctxt_global_data": torch.zeros(1, 0),
+        }
+
+        with pytest.raises(KeyError, match="recalculate_ip=True"):
+            unscaler.unscale_variables(torch.zeros(1, 1, 1), ctxt_dict)

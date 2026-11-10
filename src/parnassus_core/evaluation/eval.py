@@ -1,4 +1,6 @@
 import argparse
+import os
+from pathlib import Path
 
 import awkward as ak
 import numpy as np
@@ -15,18 +17,93 @@ from parnassus_core.evaluation.config import EvaluationConfig
 from parnassus_core.evaluation.model import EvaluationModel
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument("-c", "--config", type=str, required=True)
-parser.add_argument("-bs", "--batch_size", type=int, default=64)
-parser.add_argument("-ne", "--n_events", type=int)
-parser.add_argument("--suffix", type=str, default="")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-c", "--config", type=str, required=True)
+    parser.add_argument("-bs", "--batch_size", type=int, default=64)
+    parser.add_argument("-ne", "--n_events", type=int)
+    parser.add_argument("--suffix", type=str, default="")
+    parser.add_argument(
+        "-nw",
+        "--num_workers",
+        type=int,
+        default=0,
+        help="DataLoader worker processes assembling batches while the GPU samples.",
+    )
+    return parser.parse_args()
 
-args = parser.parse_args()
 
-torch.set_grad_enabled(False)
+def limit_cpu_threads(num_workers: int, max_threads: int = 8) -> int:
+    """Size torch's CPU thread pool to leave room for the DataLoader workers.
+
+    By default torch starts one intra-op thread per CPU in the affinity mask.
+    When busy DataLoader workers share those CPUs, every small parallel op
+    then waits on a descheduled thread: unscaling one 4096-event batch went
+    from ~90 ms to ~12 s on 26 CPUs with two busy processes. Eight threads was
+    the fastest setting measured. An explicit ``OMP_NUM_THREADS`` is respected.
+
+    Parameters
+    ----------
+    num_workers : int
+        DataLoader worker processes that will share this process's CPUs.
+    max_threads : int, optional
+        Upper bound on the pool size.
+
+    Returns
+    -------
+    int
+        The resulting ``torch.get_num_threads()``.
+    """
+    if "OMP_NUM_THREADS" not in os.environ:
+        free_cpus = len(os.sched_getaffinity(0)) - num_workers
+        torch.set_num_threads(max(1, min(max_threads, free_cpus)))
+    return torch.get_num_threads()
+
+
+def write_eval_output(
+    path: Path,
+    pflow: dict[str, np.ndarray],
+    truth: dict[str, np.ndarray],
+    event_number: np.ndarray,
+    config: EvaluationConfig,
+) -> None:
+    """Write generated events as jagged ``pflow`` / ``truth`` records.
+
+    Each ``(n_events, max_particles)`` column is stored as a variable-length
+    float32 list per event (always ``max_particles`` long), with ``ind``
+    marking the real particles.
+    """
+
+    def to_record(columns: dict[str, np.ndarray]) -> ak.Array:
+        return ak.zip(
+            {
+                key: ak.from_regular(ak.from_numpy(values.astype(np.float32)))
+                for key, values in columns.items()
+            }
+        )
+
+    with uproot.recreate(path) as file:
+        file["evt_tree"] = {
+            "pflow": to_record(pflow),
+            "truth": to_record(truth),
+            "eventNumber": ak.Array(event_number),
+        }
+        file["metadata/event_model"] = (
+            f"{config.event_model.ckpt_path} {config.event_model.n_steps}"
+        )
+        file["metadata/particle_model"] = (
+            f"{config.particle_model.ckpt_path} {config.particle_model.n_steps}"
+        )
+        if config.impact_model:
+            file["metadata/impact_model"] = (
+                f"{config.impact_model.ckpt_path} {config.impact_model.n_steps}"
+            )
 
 
 def main():
+    args = parse_args()
+    limit_cpu_threads(args.num_workers)
+    torch.set_grad_enabled(False)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     config = EvaluationConfig.from_yaml(args.config)
@@ -49,10 +126,12 @@ def main():
             entry_start=0,
             mode="eval",
             recalculate_ip=config.recalculate_ip,
+            eta_clamp=config.data_config.eta_clamp,
+            class_based_scaling=config.data_config.class_based_scaling,
         )
         loader = DataLoader(
             dataset,
-            num_workers=0,
+            num_workers=args.num_workers,
             batch_size=args.batch_size,
             shuffle=False,
             pin_memory=False,
@@ -104,38 +183,7 @@ def main():
         eval_subpath = eval_subpath.with_stem(
             eval_subpath.stem + f"_eval_{(n // 1000):d}k{args.suffix}.root"
         )
-        with uproot.recreate(eval_subpath) as file:
-            file["evt_tree"] = {
-                "pflow": ak.zip(
-                    {
-                        key: ak.values_astype(
-                            ak.Array(l_fs_data[key].astype(np.float32).tolist()),
-                            np.float32,
-                        )
-                        for key in l_fs_data.keys()
-                    }
-                ),
-                "truth": ak.zip(
-                    {
-                        key: ak.values_astype(
-                            ak.Array(l_tr_data[key].astype(np.float32).tolist()),
-                            np.float32,
-                        )
-                        for key in l_tr_data.keys()
-                    }
-                ),
-                "eventNumber": ak.Array(l_eventNumber),
-            }
-            file["metadata/event_model"] = (
-                f"{config.event_model.ckpt_path} {config.event_model.n_steps}"
-            )
-            file["metadata/particle_model"] = (
-                f"{config.particle_model.ckpt_path} {config.particle_model.n_steps}"
-            )
-            if config.impact_model:
-                file["metadata/impact_model"] = (
-                    f"{config.impact_model.ckpt_path} {config.impact_model.n_steps}"
-                )
+        write_eval_output(eval_subpath, l_fs_data, l_tr_data, l_eventNumber, config)
         if len(bad_idxs) > 0:
             rprint(f"[bold red]Found {len(bad_idxs)} bad events:[/bold red] {bad_idxs}")
         rprint(f"[bold green]Done:[/bold green] Saved to {eval_subpath.absolute()}")

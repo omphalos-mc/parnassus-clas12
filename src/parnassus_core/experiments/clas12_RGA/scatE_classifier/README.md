@@ -1,0 +1,61 @@
+# scatE classifier
+
+The CLAS12 event and particle models are trained only on events in which the scattered
+electron was reconstructed (`pflow_scatE == 1`). To run the full chain on generated
+events, that selection has to be simulated too. This classifier learns it: a small MLP
+maps the truth `(p, theta, phi)` of the scattered electron to `P(pflow_scatE == 1)`,
+a reconstruction efficiency in truth kinematics.
+
+[`evaluation/scatE_filter.py`](../evaluation/scatE_filter.py) uses the trained model to
+pre-filter an `AllEvents` sample before `eval.py`. Its default `sample` mode keeps each
+event with probability `P`, which reproduces the true efficiency because the classifier
+is well calibrated. See that module's docstring for the modes and the reference sample.
+
+## Training
+
+From the repository root:
+
+```bash
+python -m parnassus_core.experiments.clas12_RGA.scatE_classifier.train_scatE \
+    --root-file <AllEvents>.root [--n-events N] [--patience P] [--outdir DIR]
+```
+
+The input is any `evt_tree` file that keeps the events without a reconstructed electron
+(`pflow_scatE` is both 0 and 1). The run writes `best_model.ckpt` (with the feature
+standardization stored inside it), `config.json`, `metrics.json`, `history.csv` and the
+loss, ROC and confusion-matrix plots into `--outdir`. The default,
+`trained_models/classifier`, is where `scatE_filter.py` looks for the checkpoint.
+
+## The checkpoint used for the v8.1 results
+
+`trained_models/classifier/best_model.ckpt` is trained on `v8/pre-filter_train_data_v8.root`.
+That v8 sample keeps every event, with and without a reconstructed scattered electron
+(19.7% have `pflow_scatE == 1`). It overlaps `v8_train.root`, the event and particle models'
+training sample, and shares no events with `v8_test.root`, so the evaluation chain filters
+events the classifier has not seen.
+
+| Setting | Value |
+|---|---|
+| Input | First 10M of the file's 19.91M events, split 7M / 1.5M / 1.5M (seed 0) |
+| Model | MLP, 4 × 128 hidden units, ReLU, dropout 0.02 (the best trial of the Optuna search in `MLP.ipynb`, run on the v4 sample) |
+| Optimizer | Adam, lr 2.929e-3, batch 8192, 50 epochs (early-stopping patience 10, never reached), best epoch 45 |
+| Test split | Accuracy 0.957, F1 0.896, AUC 0.977 (majority-class baseline 0.803) |
+
+To retrain it with the same settings (everything else is the default):
+
+```bash
+python -m parnassus_core.experiments.clas12_RGA.scatE_classifier.train_scatE \
+    --root-file <parnassus_data>/v8/pre-filter_train_data_v8.root --n-events 10000000
+```
+
+## Exploration notebooks
+
+These are informal, kept as a record of the exploration, and only on the `train_clas12`
+development branch:
+
+- `MLP.ipynb`: data exploration, the MLP, and the Optuna hyperparameter search.
+- `BDT.ipynb`: a gradient-boosted-tree comparison.
+- `plotter.ipynb`: feature-space and calibration plots.
+- `classifier_eval.md`: notes on evaluating a checkpoint, with calibration as the main
+  criterion. Written for the earlier v4-trained checkpoint, so its files and reference
+  numbers are v4's.

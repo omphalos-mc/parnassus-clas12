@@ -164,6 +164,12 @@ class EMA(Callback):
                 )
                 return
             ema_path = ckpt_path.replace(ext, f"-EMA{ext}")
+            # Checkpoints written outside EMAModelCheckpoint (e.g. SigtermCheckpoint or a
+            # plain ModelCheckpoint) already embed the full EMAOptimizer state.
+            states = checkpoint.get("optimizer_states") or []
+            has_embedded_ema = (
+                bool(states) and isinstance(states[0], dict) and "ema" in states[0]
+            )
             if os.path.exists(ema_path):
                 ema_state_dict = torch.load(
                     ema_path, map_location=torch.device("cpu"), weights_only=False
@@ -172,6 +178,10 @@ class EMA(Callback):
                 checkpoint["optimizer_states"] = ema_state_dict["optimizer_states"]
                 del ema_state_dict
                 rank_zero_info("EMA state has been restored.")
+            elif has_embedded_ema:
+                rank_zero_info(
+                    "EMA state restored from the checkpoint's optimizer state."
+                )
             else:
                 raise MisconfigurationException(
                     "Unable to find the associated EMA weights when re-loading, "
@@ -410,7 +420,13 @@ class EMAOptimizer(torch.optim.Optimizer):
         self.ema_start_step = state_dict.get(
             "ema_start_step", 0
         )  # backwards compatibility
-        self.rebuild_ema_params = False
+        # EMA params are created inside step() at ema_start_step, so a state saved at or
+        # before that step never had them; "ema" then holds nothing or the raw weights.
+        if self.current_step <= self.ema_start_step or len(self.ema_params) == 0:
+            self.ema_params = ()
+            self.rebuild_ema_params = True
+        else:
+            self.rebuild_ema_params = False
 
     def add_param_group(self, param_group):
         self.optimizer.add_param_group(param_group)

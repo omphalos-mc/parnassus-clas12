@@ -10,6 +10,8 @@ from .performance import (
 from .prediction_writer import PredictionWriter
 from .dynamo_reset import DynamoResetCallback
 from .cuda_debug import CUDADebugCallback
+from .sigterm_checkpoint import SigtermCheckpoint
+from .swa_checkpoint import SWACheckpoint
 
 __all__ = [
     "EMA",
@@ -23,4 +25,6 @@ __all__ = [
     "PredictionWriter",
     "DynamoResetCallback",
     "CUDADebugCallback",
+    "SigtermCheckpoint",
+    "SWACheckpoint",
 ]

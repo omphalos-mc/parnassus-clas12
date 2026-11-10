@@ -60,6 +60,11 @@ class PhysicsDatasetBase(Dataset, ABC):
         Recompute impact parameters from vertex positions.
     class_based_scaling : bool
         Whether to use class-aware scaling (requires one-hot class features).
+    eta_clamp : tuple[float, float] | None
+        Inclusive ``(min, max)`` bounds that ``eta`` is clamped to for every
+        collection. Values outside the range saturate to the nearest bound
+        (they are not dropped). ``None`` disables clamping entirely. Default
+        ``(-3.0, 3.0)`` preserves the historical CMS acceptance.
     """
 
     # Variables zeroed for neutrals when zero_neutral_vtx is True.
@@ -94,6 +99,7 @@ class PhysicsDatasetBase(Dataset, ABC):
         mode: Literal["train", "test", "eval"] = "train",
         recalculate_ip: bool = False,
         class_based_scaling: bool = False,
+        eta_clamp: tuple[float, float] | None = (-3.0, 3.0),
     ):
         super().__init__()
 
@@ -110,6 +116,7 @@ class PhysicsDatasetBase(Dataset, ABC):
         self.mode = mode
         self.recalculate_ip = recalculate_ip
         self.class_based_scaling = class_based_scaling
+        self.eta_clamp = eta_clamp
 
         assert self.mode in ("train", "test", "eval"), (
             f"Mode must be 'train', 'test' or 'eval', got '{self.mode}'"

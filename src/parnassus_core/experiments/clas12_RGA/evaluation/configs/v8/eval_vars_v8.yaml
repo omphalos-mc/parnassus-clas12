@@ -1,0 +1,61 @@
+# eval_vars_v6.yaml for the v6.3 event model, which predicts (pflow - truth).
+#
+# fs_vars.particle and ctxt_vars must match configs/v6/particle_vars_v6.yaml
+# exactly, in order: EvaluationModel._get_fs_var_idxs walks these lists to
+# compute feature offsets into the generated tensor, so a reordering mis-slices
+# silently rather than raising.
+#
+# Only the truth collection is loaded here: in eval mode
+# PhysicsDatasetBase._apply_eval_filter keeps only the collections referenced by
+# ctxt_vars, so pflow_Q2 / pflow_W are never computed from data -- the event
+# model generates them, which is the whole point.
+event_vars: ["eventNumber"]
+vars_to_load:
+  truth:
+    - p
+    - pt
+    - theta
+    - phi
+    - beta
+    - vx #loaded just so I don't have the change the pv shifting code to only look at vz
+    - vy
+    - vz
+    - pdgId
+
+fs_vars:
+  event:
+    - npflow
+    - pflow_ht_p
+    - pflow_Pxh
+    - pflow_Pyh
+    - pflow_Ng
+    - pflow_Nn
+
+  particle:
+    - pflow_p
+    - pflow_theta
+    - pflow_phi
+    - pflow_beta
+    - pflow_vx
+    - pflow_vy
+    - pflow_vz
+    - pflow_pdgId
+
+ctxt_vars:
+  - truth_p
+  - truth_theta
+  - truth_phi
+  - truth_beta
+  - truth_vx
+  - truth_vy
+  - truth_vz
+  - truth_pdgId
+
+ctxt_global_vars:
+  - means
+  - ntruth
+  - truth_ht_p
+  - truth_Pxh
+  - truth_Pyh
+  - truth_Ng
+  - truth_Nn

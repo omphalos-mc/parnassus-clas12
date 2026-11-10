@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Generic, TypeVar, TypeAlias
 from .config import BaseSample
 
@@ -25,3 +25,8 @@ class BinsConfig(Generic[T]):
 
     particle_bins: BinsDictT
     particle_res_bins: BinsDictT
+
+    # DIS kinematics (Q2/xB/W/y/nu). Defaulted so CMS subclasses that never set
+    # them still construct under slots=True; DIS experiments populate these.
+    dis_bins: BinsDictT = field(default_factory=dict)
+    dis_res_bins: BinsDictT = field(default_factory=dict)

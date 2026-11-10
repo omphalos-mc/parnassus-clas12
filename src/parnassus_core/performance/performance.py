@@ -4,7 +4,7 @@ from tqdm import tqdm
 
 from .config import PflowDataConfig, SampleT, PerformanceConfig, Source
 from dataclasses import dataclass, field
-from typing import Self, Generic
+from typing import Self, Generic, ClassVar
 
 from .utils import (
     calc_jet_residuals,
@@ -18,14 +18,19 @@ from parnassus_core.utils.matching import match_objects
 
 JET_VARS = ["pt", "eta", "phi", "d2", "c2"]
 
+# DIS kinematics
+DIS_VARS = ["Q2", "xB", "W", "y", "nu"]
+
 PARTICLE_VARS = [
     "pt",
     "eta",
+    "theta",  # CLAS12 stores theta instead of eta (kept when present; absent on CMS files)
     "phi",
     "vx",
     "vy",
     "vz",
     "class",
+    "pdgId",  # CLAS12 stores real pdgId (kept when present; absent on CMS files)
     # impact parameters
     "d0",
     "d0Error",
@@ -43,6 +48,10 @@ def extract_particle_data(data: dict[str, np.ndarray], split="jet"):
     new_data = {}
     mask = None
     if mask_fn is not None:
+        # jet/bkg splits key off jet_idx; with jet clustering disabled there is
+        # no jet_idx, so these splits are undefined -> empty collection.
+        if "jet_idx" not in data:
+            return new_data
         mask = [mask_fn(x) for x in data["jet_idx"]]
     for key, value in data.items():
         if key in {f"tr_idx_{split}", f"pf_idx_{split}"}:
@@ -147,15 +156,23 @@ class Data:
             for k, v in data_dict.items()
             if ("jet_" in k and k != "jet_idx")
         }
-        jet_data["phi"] = reshape_phi(jet_data["phi"])
+        # No jet branches when clustering is disabled (e.g. CLAS12); only reshape
+        # when jets are actually present.
+        if "phi" in jet_data:
+            jet_data["phi"] = reshape_phi(jet_data["phi"])
         particle_data_all = extract_particle_data(data_dict, split="all")
         particle_data_jet = extract_particle_data(data_dict, split="jet")
         particle_data_bkg = extract_particle_data(data_dict, split="bkg")
+        # Flat per-event DIS branches (Q2/xB/W/y/nu) are loaded straight into
+        # event_data; they are computed by postprocess, not derived here. Absent
+        # on CMS files, so event_data stays empty as before.
+        event_data = {var: data_dict[var] for var in DIS_VARS if var in data_dict}
         return cls(
             name=name,
             source=source,
             label=label,
             event_number=event_number,
+            event_data=event_data,
             jet_data=jet_data,
             particle_data_all=particle_data_all,
             particle_data_jet=particle_data_jet,
@@ -227,7 +244,7 @@ class Data:
             assert key in other.event_data, f"Key {key} not found in other data."
             value = self.event_data[key]
             other_value = other.event_data[key]
-            if key in {"njet", "npart"}:
+            if key in {"njet", "npart", "Ng", "Nn", "met_x", "met_y"}:
                 self.event_data[f"{key}_res"] = value - other_value
             else:
                 self.event_data[f"{key}_res"] = (value - other_value) / (
@@ -311,6 +328,10 @@ class Data:
             print("Split: ", split)
             pf_data_dict = getattr(self, f"particle_data_{split}")
             tr_data_dict = getattr(other, f"particle_data_{split}")
+            # jet/bkg splits are empty when jets are not clustered (CLAS12); skip
+            # any split without matching indices instead of KeyError-ing.
+            if "tr_idx" not in pf_data_dict:
+                continue
             res = calc_particle_residuals(
                 pf_data_dict["tr_idx"],
                 pf_data_dict["pf_idx"],
@@ -408,7 +429,13 @@ class SampleData(Generic[SampleT]):
     _events_filtered: bool = field(default=False, init=False)
 
     @classmethod
-    def load(cls, sample: SampleT, config_list: list[PflowDataConfig]) -> Self:
+    def load(
+        cls,
+        sample: SampleT,
+        config_list: list[PflowDataConfig],
+        reference_label: str = "CMS PFlow",
+        truth_label: str = "Truth",
+    ) -> Self:
         data_dict = {}
         cms_loaded = False
         for pflow_data_config in config_list:
@@ -424,14 +451,14 @@ class SampleData(Generic[SampleT]):
             if not cms_loaded:
                 pf_data = Data.load_from_dict(
                     name=Source.PF.name,
-                    label="CMS PFlow",
+                    label=reference_label,
                     source=Source.PF,
                     data_dict=data_["pflow"],
                     event_number=data_["eventNumber"],
                 )
                 tr_data = Data.load_from_dict(
                     name=Source.TR.name,
-                    label="Truth",
+                    label=truth_label,
                     source=Source.TR,
                     data_dict=data_["truth"],
                     event_number=data_["eventNumber"],
@@ -474,18 +501,28 @@ class SampleData(Generic[SampleT]):
     def process_data(self):
         for data in self.data_dict.values():
             data.calculate_event_data()
+        tr_data = self.data_dict[Source.TR.name]
+        # skip jet matching and resiiduals if no jets and no matching
+        has_jets = bool(tr_data.jet_data)
         for data in self.data_dict.values():
             if data.source != Source.TR:
                 print(f"Processing data for {data.name} with source {data.source}")
-                data.calculate_event_residuals(self.data_dict[Source.TR.name])
-                data.match_jets(self.data_dict[Source.TR.name])
-                data.calculate_jet_residuals(self.data_dict[Source.TR.name])
-                data.calculate_particle_residuals(self.data_dict[Source.TR.name])
+                data.calculate_event_residuals(tr_data)
+                if has_jets:
+                    data.match_jets(tr_data)
+                    data.calculate_jet_residuals(tr_data)
+                if "tr_idx" in data.particle_data_all:
+                    data.calculate_particle_residuals(tr_data)
                 data.calculate_impact_parameters()
         print(f"Processed data for sample {self.sample.name}")
 
 
 class Performance(Generic[SampleT]):
+    # Legend labels for the reference (pflow, Source.PF) and truth (Source.TR)
+    # collections auto-extracted from the first file. Override per experiment.
+    reference_label: ClassVar[str] = "CMS PFlow"
+    truth_label: ClassVar[str] = "Truth"
+
     def __init__(self, config: PerformanceConfig):
         self.config = config
         self.sample_data_dict: dict[SampleT, SampleData[SampleT]] = {}
@@ -493,7 +530,10 @@ class Performance(Generic[SampleT]):
     def load(self):
         for sample, config_list in self.config.sample_dict.items():
             self.sample_data_dict[sample] = SampleData[SampleT].load(
-                sample, config_list
+                sample,
+                config_list,
+                reference_label=self.reference_label,
+                truth_label=self.truth_label,
             )
 
     def process(self):

@@ -134,7 +134,7 @@ def build_ctxt_data(
         coll_order.append(coll_name)
         data = collection_data[coll_name]
         mask = collection_masks[coll_name]
-        particle_class = data.get("class")
+        particle_class = feature_scaler.particle_groups(data)
         particle_class_indices = None
         if particle_class is not None and feature_scaler.class_based_scaling:
             class_ids = list(feature_scaler.class_transforms.keys())
@@ -233,7 +233,7 @@ def build_fs_data(
 
         data = collection_data[coll]
         mask = collection_masks[coll].clone()
-        particle_class = data.get("class")
+        particle_class = feature_scaler.particle_groups(data)
         particle_class_indices = None
         if particle_class is not None and feature_scaler.class_based_scaling:
             class_ids = list(feature_scaler.class_transforms.keys())
@@ -411,6 +411,7 @@ def compute_means(
         if var_helper.get_collection(v) == collection_name
         and "class" not in v
         and "charge" not in v
+        and "pdgId" not in v
     ]
 
     if not filtered:

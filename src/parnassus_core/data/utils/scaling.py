@@ -6,6 +6,12 @@ from sklearn.preprocessing import QuantileTransformer
 import pickle
 
 from parnassus_core.data.utils.variable_helper import VariableHelper
+from parnassus_core.utils.pid import (
+    N_PID_CLASSES,
+    onehot_index_to_pdgid,
+    pdgid_to_class,
+    pdgid_to_onehot_index,
+)
 
 TRANSFORM_TYPES = {
     "std",
@@ -23,6 +29,19 @@ TRANSFORM_FUNCTIONS = {
     "atan",
     "pow",
     None,  # No function
+}
+
+# Relative momentum variables, unscaled back to the absolute variable by multiplying
+# with the collection's event-level sum: base name -> (absolute name, sum name).
+RELATIVE_VARS = {
+    "ptrel": ("pt", "ht"),
+}
+
+# Per-particle transform blocks read with class_based_scaling: block-name prefix ->
+# the per-particle field whose value selects the block (class_3, pdgId_-211, ...).
+GROUP_BLOCK_PREFIXES = {
+    "class_": "class",
+    "pdgId_": "pdgId",
 }
 
 
@@ -86,7 +105,10 @@ class VarTransform:
             x_np = self.qt.transform(x_np)
             x = torch.from_numpy(x_np.reshape(shape)).to(device)
         match self.fn:
-            case "log" | "log1p" | "sqrt" | "tanh" | "asinh" | "atan":
+            case "log":
+                # Added a clamp to avoid log blowing up to inf
+                x = torch.log(torch.clamp(x, min=torch.finfo(x.dtype).tiny))
+            case "log1p" | "sqrt" | "tanh" | "asinh" | "atan":
                 x = getattr(torch, self.fn)(x)
             case "pow":
                 x = torch.sign(x) * torch.pow(torch.abs(x), self.power)
@@ -154,6 +176,12 @@ class FeatureScaler:
         ----------
         scale_dict : str
             Path to the YAML file containing scaling parameters for features.
+        class_based_scaling : bool
+            Scale per-particle variables with per-group transform blocks: either
+            ``class_<id>`` blocks, selected by the particle's ``class``, or
+            ``pdgId_<id>`` blocks, selected by its ``pdgId`` bucketed like the
+            pdgId one-hot (species without a bucket -> ``pdgId_0``). The two
+            kinds cannot be mixed.
         """
         import yaml
 
@@ -161,14 +189,23 @@ class FeatureScaler:
             self.scale_dict = yaml.safe_load(f)
 
         self.class_based_scaling = class_based_scaling
+        # Per-particle field selecting the transform block: "class" or "pdgId".
+        self.group_var: str | None = None
         self.class_transforms: dict[int, dict[str, VarTransform]] = {}
         self._class_var_transforms: dict[str, list[tuple[int, VarTransform]]] = (
             defaultdict(list)
         )
         self.transforms = defaultdict(get_empty_transform)
         for name, config in self.scale_dict.items():
-            if name.startswith("class_") and self.class_based_scaling:
-                class_id = int(name.split("_")[1])
+            prefix = next((p for p in GROUP_BLOCK_PREFIXES if name.startswith(p)), None)
+            if prefix is not None and self.class_based_scaling:
+                group_var = GROUP_BLOCK_PREFIXES[prefix]
+                if self.group_var not in (None, group_var):
+                    raise ValueError(
+                        "class_N and pdgId_N transform blocks cannot be mixed."
+                    )
+                self.group_var = group_var
+                class_id = int(name[len(prefix) :])
                 if not isinstance(config, dict):
                     raise ValueError(
                         f"Class config '{name}' must be a mapping of variable transforms."
@@ -184,8 +221,31 @@ class FeatureScaler:
 
         if self.class_based_scaling and not self.class_transforms:
             raise ValueError(
-                "class_based_scaling is enabled but no class_N transform blocks were found."
+                "class_based_scaling is enabled but no class_N or pdgId_N transform "
+                "blocks were found."
             )
+
+    def particle_groups(self, data: dict[str, torch.Tensor]) -> torch.Tensor | None:
+        """Per-particle ids selecting the class_N / pdgId_N transform blocks.
+
+        Parameters
+        ----------
+        data : dict[str, torch.Tensor]
+            One collection's ``{bare_var: Tensor(…, N)}``.
+
+        Returns
+        -------
+        torch.Tensor | None
+            The ``class`` field, or with ``pdgId_N`` blocks the bucketed
+            ``pdgId`` (the value ``Unscaler`` decodes from the one-hot, so both
+            directions pick the same block); None if the field is absent.
+        """
+        if self.group_var == "pdgId":
+            pdgid = data.get("pdgId")
+            if pdgid is None:
+                return None
+            return onehot_index_to_pdgid(pdgid_to_onehot_index(pdgid))
+        return data.get("class")
 
     def __getitem__(self, name: str) -> VarTransform:
         """
@@ -343,6 +403,7 @@ class Unscaler:
                 collection == self.primary_coll
                 and ("charge" not in base_name)
                 and ("class" not in base_name)
+                and ("pdgId" not in base_name)
             ):
                 self.mean_vars.append(base_name)
 
@@ -358,12 +419,19 @@ class Unscaler:
         self.target_collection = target_collection
         self.ctxt_collection = ctxt_collection
 
+        # Unshifting adds the primary vertex z back to vz_shifted variables
+        # only, so pv_coords is needed only when one of them is present.
+        self.has_vz_shifted = any(
+            self.var_helper.get_base_name(var) == "vz_shifted"
+            for var in self.fs_vars + self.ctxt_vars
+        )
+
     def _unscale_per_particle_vars(
         self,
         data: torch.Tensor,
         vars_list: list[str],
         new_data_dict: dict,
-        pv_z: np.ndarray,
+        pv_z: np.ndarray | None,
         unshift: bool,
     ) -> torch.Tensor | None:
         """Unscale a per-particle tensor into new_data_dict using vars_list ordering.
@@ -376,8 +444,9 @@ class Unscaler:
             The list of variable names to unscale.
         new_data_dict : dict
             The dictionary to store the unscaled variables.
-        pv_z : float
-            The primary vertex z-coordinate.
+        pv_z : np.ndarray or None
+            Per-event primary vertex z, shape (B, 1); None when no variable
+            needs unshifting.
         unshift : bool
             Whether to unshift the variables.
 
@@ -406,9 +475,9 @@ class Unscaler:
             )
             var_idx += index_shift
             var = var.numpy()
-            if base_name == "ptrel":
-                var = var * new_data_dict[f"{collection}_ht"].reshape(-1, 1)
-                base_name = "pt"
+            if base_name in RELATIVE_VARS:
+                base_name, sum_name = RELATIVE_VARS[base_name]
+                var = var * new_data_dict[f"{collection}_{sum_name}"].reshape(-1, 1)
             if base_name == "vz_shifted" and unshift:
                 var = var + pv_z
                 base_name = "vz"
@@ -431,6 +500,15 @@ class Unscaler:
                 var_idx += 3
             elif scaler_key.endswith("class"):
                 return data[..., var_idx : var_idx + 5].argmax(-1)
+            elif scaler_key.endswith("pdgId"):
+                # PID config: if there is no 'class' target, the decoded pdgId selects
+                # the pdgId_N blocks directly, or its class (via pdgid_class_dict)
+                # the class_N blocks.
+                idx = data[..., var_idx : var_idx + N_PID_CLASSES].argmax(-1)
+                pdgid = onehot_index_to_pdgid(idx)
+                if self.feature_scaler.group_var == "pdgId":
+                    return pdgid
+                return pdgid_to_class(pdgid)
             else:
                 var_idx += 1
             if base_name.endswith("class"):
@@ -458,6 +536,10 @@ class Unscaler:
         elif var_name.endswith("class"):
             var = data[..., var_idx : var_idx + 5].argmax(-1)
             index_shift = 5
+        elif var_name.endswith("pdgId"):
+            idx = data[..., var_idx : var_idx + N_PID_CLASSES].argmax(-1)
+            var = onehot_index_to_pdgid(idx)
+            index_shift = N_PID_CLASSES
         else:
             var = self.feature_scaler.inverse_transform(
                 var_name,
@@ -485,7 +567,9 @@ class Unscaler:
         target_data : torch.Tensor, optional
             The target data tensor to unscale (if available), by default None.
         unshift : bool, optional
-            Whether to unshift the vz variable by adding back the primary vertex z, by default True.
+            Whether to unshift vz_shifted variables by adding back the primary
+            vertex z, by default True. Requires ``ctxt_dict["pv_coords"]`` only
+            when some fs or context variable is vz_shifted.
 
         Returns
         -------
@@ -522,7 +606,14 @@ class Unscaler:
                 )
                 var_idx += 1
 
-        pv_z = ctxt_dict["pv_coords"][:, -1].numpy().reshape(-1, 1) if unshift else None
+        pv_z = None
+        if unshift and self.has_vz_shifted:
+            if "pv_coords" not in ctxt_dict:
+                raise KeyError(
+                    "Unshifting vz_shifted needs ctxt_dict['pv_coords']; load the "
+                    "dataset with recalculate_ip=True or pass unshift=False."
+                )
+            pv_z = ctxt_dict["pv_coords"][:, -1].numpy().reshape(-1, 1)
 
         # Per-particle context variables
         self._unscale_per_particle_vars(
@@ -583,11 +674,11 @@ class Unscaler:
 
             var_idx += index_shift
 
-            if base_name == "ptrel":
-                ht = new_data_dict[f"{collection}_ht"].reshape(-1, 1)
+            if base_name in RELATIVE_VARS:
+                base_name, sum_name = RELATIVE_VARS[base_name]
+                ht = new_data_dict[f"{collection}_{sum_name}"].reshape(-1, 1)
                 fs_ = fs_ * ht
                 target_ = target_ * ht if has_target else None
-                base_name = "pt"
             if base_name == "vz_shifted" and unshift:
                 fs_ = fs_ + pv_z
                 if has_target and target_ is not None:

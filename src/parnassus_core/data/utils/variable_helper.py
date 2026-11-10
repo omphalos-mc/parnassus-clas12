@@ -194,6 +194,11 @@ class VarConfig:
         """
         with open(var_dict) as f:
             cfg = yaml.safe_load(f)
+        if cfg.get("predict_diff"):
+            raise ValueError(
+                f"{var_dict} sets predict_diff, which has been removed. "
+                "Use the pre-cleanup tag to run configs that train on residuals."
+            )
 
         if "vars_to_load" in cfg:
             vars_to_load: dict[str, list[str]] = cfg["vars_to_load"]

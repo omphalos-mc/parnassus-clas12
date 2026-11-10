@@ -1,0 +1,38 @@
+# Post-processing config for v8 particle-model tests, union join.
+# Consumed by: python -m parnassus_core.evaluation.postprocess_eval -c <this file>
+#
+# Identical to postprocess_union.yaml except for `df: true`. It is meant for the
+# particleNetTest files that the PredictionWriter callback writes when the particle
+# model is tested on its own (the Lightning `test` subcommand): those store the
+# generated particles as `fastsim` next to the full-sim `pflow` targets, and
+# `df: true` reads the generated collection from `fastsim` instead of `pflow`.
+# The full-chain eval.py output uses postprocess_union.yaml.
+
+branch_layout: auto
+particle_vars: [p, theta, phi, beta, vx, vy, vz, pdgId]
+
+pt_min: 0.0
+eta_cut: 4.999
+
+cluster_jets: false
+calc_substructure: false
+
+matching: true
+dr_cut: 0.3
+fourvec: true
+refine_energy: true
+
+compute_dis: true
+beam_energy: 10.60410
+target_mass: 0.938272
+
+df: true
+join: union
+# max_event_number is deliberately left unset; see postprocess_union.yaml.
+
+
+# python -m parnassus_core.evaluation.postprocess_eval \
+#   -i logs/<particle run>/<run>_particleNetTest_<k>k.root \
+#   -d <parnassus_data>/v8/v8_test_filtered_truth.root \
+#   -o logs/<particle run>/particleNetTest_postprocess.root -n -1 \
+#   -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/v8/postprocess_df.yaml

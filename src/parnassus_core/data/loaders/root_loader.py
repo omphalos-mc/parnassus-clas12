@@ -24,6 +24,8 @@ Usage::
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import numpy as np
 import uproot
 
@@ -102,6 +104,44 @@ class ROOTFileLoader(FileLoader):
             library="np",
             entry_start=entry_start,
             entry_stop=entry_stop,
+        )
+
+    def iter_branches(
+        self,
+        branch_names: list[str],
+        entry_start: int,
+        entry_stop: int,
+        step_size: int,
+    ) -> Iterator[dict[str, np.ndarray]]:
+        """Bulk-read ``branch_names`` in consecutive chunks of events.
+
+        Same output format as :meth:`load_branches`, one dict per chunk of
+        ``step_size`` events (the last chunk may be shorter).  Use this when
+        the ragged ``dtype=object`` arrays of the full range would not fit in
+        memory at once.
+
+        Parameters
+        ----------
+        branch_names : list[str]
+            Branch names exactly as they appear in the TTree.
+        entry_start, entry_stop : int
+            Event range ``[entry_start, entry_stop)``.
+        step_size : int
+            Number of events per chunk.
+
+        Yields
+        ------
+        dict[str, np.ndarray]
+            ``{branch_name: array}`` for one chunk of events.
+        """
+        if not branch_names or entry_stop <= entry_start:
+            return
+        yield from self._tree.iterate(
+            branch_names,
+            library="np",
+            entry_start=entry_start,
+            entry_stop=entry_stop,
+            step_size=step_size,
         )
 
     # ------------------------------------------------------------------

@@ -1,0 +1,55 @@
+# Post-processing config for the v8 / v8.1 full-chain evaluation, union join.
+# Consumed by: python -m parnassus_core.evaluation.postprocess_eval -c <this file>
+#
+# Joins the eval output (-i, fast sim) to the scatE_filter truth-mode reference
+# (-d, full sim) by eventNumber and keeps every event in EITHER sample, so neither
+# side is filtered by the other. Rows the reference does not cover (classifier false
+# positives) get an empty pflow collection and take their truth from the eval file;
+# rows the eval run does not cover (false negatives, or events dropped by the
+# max_particles veto) get an empty fastsim collection. An empty collection means
+# "this event is not in my reconstructed-electron set", which is the comparison
+# being made. For the v8.1 paper run (all 29.91M events of v8_test.root):
+#
+#   -i clasdis_v8_1_filtered/clasdis_v8_filtered_eval_5862kv8_filter_29M_test.root  (5,862,629 events)
+#   -d <parnassus_data>/v8/v8_test_filtered_truth.root                               (5,900,918 events)
+#   -> union 6,909,889 rows; -n 6000000 keeps the first 6,000,000 by eventNumber
+#      (eventNumber < 25,971,175) = 4,214,491 in both
+#                                 +   875,932 fastsim-only
+#                                 +   909,576 reference-only
+#                                 +         1 with no particle passing the cuts
+
+branch_layout: auto
+particle_vars: [p, theta, phi, beta, vx, vy, vz, pdgId]
+
+pt_min: 0.0
+eta_cut: 4.999
+
+cluster_jets: false
+calc_substructure: false
+
+matching: true
+dr_cut: 0.3
+fourvec: true
+refine_energy: true
+
+compute_dis: true
+beam_energy: 10.60410
+target_mass: 0.938272
+
+# --- join ---
+join: union
+# max_event_number is deliberately left unset. With join=union, postprocess_eval
+# defaults it to the last eventNumber in -i, which is the ceiling of what the chain
+# was actually offered. When scatE_filter stops at --n-keep, the reference read over
+# the same --n-read window runs past that, and those trailing reference-only rows
+# would bias the reference with full-sim electrons that have no fastsim counterpart.
+# Set it explicitly only to cap *below* the eval file's coverage -- a hardcoded value
+# goes stale as soon as --n-keep changes.
+# max_event_number: <eventNumber>
+
+
+# python -m parnassus_core.evaluation.postprocess_eval \
+#   -i clasdis_v8_1_filtered/clasdis_v8_filtered_eval_5862kv8_filter_29M_test.root \
+#   -d <parnassus_data>/v8/v8_test_filtered_truth.root \
+#   -o clasdis_v8_1_filtered/postprocess_dr_0_3_v8_filter_29M.root -n 6000000 \
+#   -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/v8/postprocess_union.yaml

@@ -7,6 +7,7 @@ from rich import print as rprint
 from parnassus_core.flow.sampling import SamplerType
 
 DEFAULT_MAX_PARTICLES = 400
+DEFAULT_ETA_CLAMP = (-3.0, 3.0)
 
 
 @dataclass
@@ -45,11 +46,27 @@ class DataConfig:
     max_particles: int
     datasets: list[DatasetConfig]
     top_folder: str | Path = ""
+    eta_clamp: tuple[float, float] | None = DEFAULT_ETA_CLAMP
+    # Must match training: scale per-particle variables with the class_N /
+    # pdgId_N blocks of scale_dict (see FeatureScaler).
+    class_based_scaling: bool = False
+
+    def __post_init__(self):
+        if self.eta_clamp is not None:
+            self.eta_clamp = tuple(float(v) for v in self.eta_clamp)
+            assert len(self.eta_clamp) == 2, (
+                f"eta_clamp must be a [min, max] pair, got {self.eta_clamp}."
+            )
+            assert self.eta_clamp[0] < self.eta_clamp[1], (
+                f"eta_clamp min must be below max, got {self.eta_clamp}."
+            )
 
     @classmethod
     def from_dict(cls, data_dict: dict) -> Self:
         top_folder = Path(data_dict.get("top_folder", ""))
         max_particles = data_dict.get("max_particles", DEFAULT_MAX_PARTICLES)
+        eta_clamp = data_dict.get("eta_clamp", DEFAULT_ETA_CLAMP)
+        class_based_scaling = bool(data_dict.get("class_based_scaling", False))
         datasets = []
         for ds in data_dict.get("datasets", []):
             datasets.append(
@@ -60,7 +77,13 @@ class DataConfig:
                 )
             )
 
-        return cls(max_particles, datasets=datasets, top_folder=top_folder)
+        return cls(
+            max_particles,
+            datasets=datasets,
+            top_folder=top_folder,
+            eta_clamp=eta_clamp,
+            class_based_scaling=class_based_scaling,
+        )
 
 
 @dataclass(frozen=True)
@@ -93,6 +116,11 @@ class EvaluationVarConfig:
         """
         with open(var_dict) as f:
             cfg = yaml.safe_load(f)
+        if cfg.get("predict_diff"):
+            raise ValueError(
+                f"{var_dict} sets predict_diff, which has been removed. "
+                "Use the pre-cleanup tag to evaluate models trained on residuals."
+            )
 
         return EvaluationVarConfig(
             ctxt_vars=cfg["ctxt_vars"],
@@ -113,6 +141,13 @@ class EvaluationConfig:
     particle_model: ModelConfig
     impact_model: ModelConfig | None = None
     recalculate_ip: bool = False
+    # Hand each network only the particle slots some event in the batch uses,
+    # instead of all max_particles; exact for masked attention (see
+    # EvaluationModel._trimmed).
+    trim_padding: bool = False
+    # torch.compile the networks the samplers call (see
+    # EvaluationModel.compile_models).
+    torch_compile: bool = False
 
     @classmethod
     def from_yaml(cls, yaml_path: str | Path) -> Self:
@@ -160,4 +195,6 @@ class EvaluationConfig:
             particle_model=particle_model,
             impact_model=impact_model,
             recalculate_ip=config_data.get("recalculate_ip", False),
+            trim_padding=config_data.get("trim_padding", False),
+            torch_compile=config_data.get("torch_compile", False),
         )

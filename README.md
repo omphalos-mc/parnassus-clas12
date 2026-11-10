@@ -4,7 +4,30 @@ Core training, preprocessing, inference, and evaluation code for Parnassus, a
 particle-level fast-simulation framework based on flow matching.
 
 The package provides shared model and data infrastructure together with
-experiment configurations for CMS 2011 and CMS 2012 data.
+experiment configurations for CMS 2011, CMS 2012 and CLAS12 RG-A data.
+
+## CLAS12 RG-A paper release
+
+This repository holds the code for "TODO: paper title" (arXiv: TODO), a
+Parnassus fast simulation of CLAS12 for RG-A Fall 2018 inbending. It extends
+the Parnassus core library with the CLAS12 experiment.
+
+- **`main`** is the release: the library, the CLAS12 v8.1 configs, the scatE
+  classifier, the job scripts, and the two notebooks behind the paper figures.
+  Start with the [CLAS12 README](src/parnassus_core/experiments/clas12_RGA/README.md).
+- **`train_clas12`** is the informal development branch, with the analysis
+  tools in `tools/`, the configs of every model version, and the full history.
+  The `pre-cleanup` tag can rerun the v0–v7 models.
+- **Data preparation** (CLAS12 HIPO files to the ROOT trees used here) is in
+  [parnassus_data_prep](https://github.com/tjayhllstrn/parnassus_data_prep).
+- **Trained checkpoints and the postprocessed MC evaluation output** are on
+  Zenodo (DOI: TODO). Real CLAS12 RG-A data are not distributed.
+
+To clone only the release:
+
+```bash
+git clone --single-branch -b main https://github.com/tjayhllstrn/parnassus-core-clas12-configs.git
+```
 
 ## Installation
 
@@ -45,8 +68,10 @@ Available experiments:
 
 - [CMS 2011](src/parnassus_core/experiments/cms_2011/README.md)
 - [CMS 2012](src/parnassus_core/experiments/cms_2012/README.md)
+- [CLAS12 RG-A](src/parnassus_core/experiments/clas12_RGA/README.md): a
+  scattered-electron classifier pre-filter, then event and particle models
 
-Both experiments implement a three-stage generation chain:
+Both CMS experiments implement a three-stage generation chain:
 
 1. **Event model**: event-level quantities such as multiplicity, missing
    transverse momentum, and scalar transverse momentum.
@@ -223,7 +248,7 @@ python -m parnassus_core.flow.export.export \
 src/parnassus_core/
 ├── data/           # ROOT/HDF5 datasets, loaders, transforms, data module
 ├── evaluation/     # Full-chain inference and ROOT postprocessing
-├── experiments/    # CMS 2011 and CMS 2012 configs and entry points
+├── experiments/    # CMS 2011, CMS 2012 and CLAS12 RG-A configs and entry points
 ├── flow/           # Models, modules, losses, samplers, callbacks, export
 ├── performance/    # Shared physics-performance and plotting utilities
 ├── preprocessing/  # ROOT/HDF5 conversion, merging, scaling, format bridges

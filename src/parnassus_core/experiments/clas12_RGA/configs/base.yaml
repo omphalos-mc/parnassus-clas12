@@ -1,0 +1,73 @@
+seed_everything: 42
+
+data:
+  num_workers: 14
+  train_batch_size: 800
+  valid_batch_size: 1000
+
+  max_particles: 53
+  zero_neutral_vtx: true
+  sin_cos: true
+
+  eta_clamp: [-3.0, 5.0]
+
+  num_train: 40_000_000
+  num_valid: 500_000
+  num_test: 5_000_000
+
+  entry_start_train: 0
+  entry_start_valid: 40_000_000
+  entry_start_test: 0
+
+  # Site-specific: point these at your copy of the v8 samples. The stage configs
+  # (e.g. configs/v8/event_v8_1.yaml) override train_path and valid_path.
+  train_path: "/global/cfs/cdirs/m3246/tjhellst/parnassus_data/v8/v8_train.root"
+  valid_path: "/global/cfs/cdirs/m3246/tjhellst/parnassus_data/v8/v8_train.root"
+  test_path: "/global/cfs/cdirs/m3246/tjhellst/parnassus_data/v8/v8_test.root"
+
+# Training stuff here
+trainer:
+  gradient_clip_val: 1.0
+  max_epochs: 70
+  accelerator: gpu
+  devices: 2
+  num_nodes: 2
+  strategy: ddp
+  precision: bf16-mixed
+  default_root_dir: logs
+  enable_progress_bar: True
+
+  # Specify loggers here
+  logger:
+    class_path: lightning.pytorch.loggers.CometLogger
+    init_args:
+      project: clas12_train_parnassus
+      online: true
+      mode: get_or_create
+
+  callbacks:
+    - class_path: parnassus_core.flow.callbacks.Checkpoint
+      init_args:
+        monitor: val/loss
+        save_last: true
+        every_n_train_steps: 1000
+    - class_path: lightning.pytorch.callbacks.ModelSummary
+      init_args:
+        max_depth: 2
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+    - class_path: lightning.pytorch.callbacks.TQDMProgressBar
+      init_args:
+        refresh_rate: 50
+    - class_path: parnassus_core.flow.callbacks.PredictionWriter
+
+model:
+  optimizer: Lion
+  optimizer_kwargs:
+    lr: 3e-5
+    weight_decay: 0.01
+  lrs_config:
+    skip_scheduler: false
+    lr_scheduler_type: cosine
+    lr_scheduler_kwargs:
+      first_cycle_steps: 15
+      gamma: 0.85

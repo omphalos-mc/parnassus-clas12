@@ -1,0 +1,61 @@
+# Full-chain v8.1 evaluation (event model -> particle model) on a classifier-filtered
+# CLAS12 sample. The scatE classifier supplies the scattered-electron reconstruction
+# efficiency: scatE_filter keeps each event of v8_test.root with the classifier's
+# probability and writes the fast-sim input read below. For the paper run:
+#
+#   python -m parnassus_core.experiments.clas12_RGA.evaluation.scatE_filter \
+#       -i <parnassus_data>/v8/v8_test.root \
+#       -o <parnassus_data>/v8/v8_test_filtered.root \
+#       --mode sample -ne -1 --n-keep 2_000_000 --seed 0
+#
+# The same command with `--mode truth` and -o v8_test_filtered_truth.root builds the
+# full-sim reference for postprocess_eval's -d (postprocess_union.yaml); see the
+# evaluation section of the experiment README.
+
+eval_path: clasdis_v8_1_filtered
+
+# clas12 models raw vz (not vz_shifted); recalculate_ip=True forwards pv_coords
+# so the unscaler's default unshift path has the tensor it dereferences.
+recalculate_ip: False
+
+# Exact inference speedups (see EvaluationModel). trim_padding hands each network
+# only the particle slots some event in the batch fills (~90% of the 53 slots are
+# padding here); torch_compile compiles the networks the samplers call. Both keep
+# fp32 and the samplers below unchanged.
+trim_padding: true
+torch_compile: true
+
+scale_dict: src/parnassus_core/experiments/clas12_RGA/configs/v8/var_transform_v8.yaml
+var_dict: src/parnassus_core/experiments/clas12_RGA/evaluation/configs/v8/eval_vars_v8.yaml
+
+event_model:
+  ckpt_path: /global/homes/t/tjhellst/link_to_work/parnassus-core/logs/v8_1_clas12_RGA_event_20261029-T220829/ckpts/epoch=109-step=137500-val_loss=0.68851-SWA.ckpt
+  # Same sampler as training and the per-epoch eventNetTest runs.
+  sampler_type: "pndm"
+  n_steps: 25
+
+particle_model:
+  ckpt_path: /global/homes/t/tjhellst/link_to_work/parnassus-core/logs/v8_1_clas12_RGA_particle_20261029-T214538/ckpts/epoch=109-step=137500-val_loss=0.31480-SWA.ckpt
+  sampler_type: "dpm"
+  n_steps: 40
+
+
+data:
+  top_folder: /global/cfs/cdirs/m3246/tjhellst/parnassus_data
+  # Match training (configs/base.yaml). The eval default is 400, but AllEvents
+  # carries a high-multiplicity tail that AllScatE never had, and both the
+  # dataset-level `ntruth < max_particles` cut and generate_event's
+  # `fs_npart < max_particles` veto key off this value -- so pin it to the
+  # trained regime rather than inheriting the CMS-era default.
+  max_particles: 53
+  # Must match training (configs/base.yaml): CLAS12 forward tracks reach eta > 4,
+  # and the scaler stats were fit on data clamped this way.
+  eta_clamp: [-3.0, 5.0]
+  # Must match training (event_v8_1.yaml / particle_v8_1.yaml): p and theta
+  # use the per-pdgId blocks of var_transform_v8.yaml, both for the truth
+  # conditioning and for unscaling the generated particles.
+  class_based_scaling: true
+  datasets:
+    - name: clasdis_v8_filtered
+      path: v8/v8_test_filtered.root
+      n_events: 500_000

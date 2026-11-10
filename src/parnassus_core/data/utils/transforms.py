@@ -2,7 +2,7 @@
 
 Handles:
 - Sin/cos transforms for angular variables (phi)
-- One-hot encoding for categorical variables (class, charge)
+- One-hot encoding for categorical variables (class, charge, pdgId)
 - Feature scaling via FeatureScaler with 3-step scaler key logic
 
 All transforms are shape-agnostic: they work on any leading batch dimensions.
@@ -16,6 +16,7 @@ from torch import Tensor
 
 from parnassus_core.data.utils.variable_helper import VariableHelper
 from parnassus_core.data.utils.scaling import FeatureScaler
+from parnassus_core.utils.pid import pdgid_to_onehot_index, N_PID_CLASSES
 
 
 def apply_variable_transform(
@@ -37,7 +38,8 @@ def apply_variable_transform(
     1. phi variables + sin_cos=True → ``[sin(phi), cos(phi)]`` → ``(..., 2)``
     2. charge variables → one-hot (3 classes: -1, 0, +1) → ``(..., 3)``
     3. class variables → one-hot (5 classes: 0-4) → ``(..., 5)``
-    4. All others → feature scaling → ``(..., 1)``
+    4. pdgId variables → one-hot (N_PID_CLASSES: species + "other") → ``(..., N_PID_CLASSES)``
+    5. All others → feature scaling → ``(..., 1)``
 
     For feature scaling, the scaler key is derived via
     ``VariableHelper.scaler_key()`` (3-step: strip prefix → normalize
@@ -56,6 +58,7 @@ def apply_variable_transform(
         - sin/cos: ``(..., 2)``
         - one-hot charge: ``(..., 3)``
         - one-hot class: ``(..., 5)``
+        - one-hot pdgId: ``(..., N_PID_CLASSES)``
         - scaled: ``(..., 1)``
 
     Examples:
@@ -87,7 +90,13 @@ def apply_variable_transform(
         # squeeze(-1): (..., 1) → (...,) — safe for any batch dimension
         return F.one_hot(data.long().squeeze(-1), num_classes=5).float()
 
-    # 4. Feature scaling for all other variables
+    # 4. One-hot encoding for pdgId (species buckets + "other" → N_PID_CLASSES)
+    if var_name.endswith("pdgId"):
+        # squeeze(-1): (..., 1) → (...,) — safe for any batch dimension
+        idx = pdgid_to_onehot_index(data.squeeze(-1))
+        return F.one_hot(idx, num_classes=N_PID_CLASSES).float()
+
+    # 5. Feature scaling for all other variables
     if var_helper is None:
         raise ValueError(f"var_helper is required to scale '{var_name}'")
     scaler_key = var_helper.scaler_key(var_name)

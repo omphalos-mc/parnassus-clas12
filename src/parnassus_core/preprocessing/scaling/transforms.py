@@ -104,6 +104,56 @@ def apply_custom_transform(arr: np.ndarray, config: dict) -> np.ndarray:
     )[mask]
 
 
+def get_simple_configs(
+    var_configs: dict[str, VariableConfig],
+    var_names: list[str],
+) -> dict[str, dict[str, Any]]:
+    """Transform configs for single-pass variables (no median/IQR needed).
+
+    Mirrors :func:`get_deferred_configs` minus the ``arcsinh_iqr`` /
+    ``log_median`` branches, which require a full pass over the data before the
+    transform can be applied. Only variables that actually declare an ``fn``
+    get an entry.
+
+    Args:
+        var_configs: Parsed variable configs, keyed by bare variable name.
+        var_names: Variables to build configs for.
+
+    Returns:
+        Config dicts consumable by :func:`apply_custom_transform`, keyed by
+        variable name, containing only the variables that declare an ``fn``.
+
+    Raises:
+        ValueError: If a variable requests ``arcsinh_iqr`` or ``log_median``,
+            which need statistics this single-pass path cannot supply.
+    """
+    output: dict[str, dict[str, Any]] = {}
+
+    for var_name in var_names:
+        var_cfg = var_configs[var_name]
+        if var_cfg.fn is None:
+            continue
+
+        if var_cfg.fn in ("arcsinh_iqr", "log_median"):
+            raise ValueError(
+                f"Variable '{var_name}' requests fn='{var_cfg.fn}', which needs a "
+                "median/IQR from a first pass over the data and is only supported "
+                "for deferred particle variables."
+            )
+
+        config: dict[str, Any] = {"fn": var_cfg.fn}
+        if var_cfg.fn_scale is not None:
+            config["fn_scale"] = var_cfg.fn_scale
+        if var_cfg.fn_shift != 0.0:
+            config["fn_shift"] = var_cfg.fn_shift
+        if var_cfg.abs_clip is not None:
+            config["abs_clip"] = var_cfg.abs_clip
+
+        output[var_name] = config
+
+    return output
+
+
 def get_deferred_configs(
     particle_var_configs: dict[str, VariableConfig],
     deferred_vars: list[str],

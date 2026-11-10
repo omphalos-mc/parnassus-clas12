@@ -9,6 +9,74 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+# PDG codes for the species-based event variables (Ng, Nn, Pxh, Pyh).
+ELECTRON_PDGID = 11
+PHOTON_PDGID = 22
+NEUTRON_PDGID = 2112
+THETA_MIN = 1e-3  # rad; floor for 1 / sin(theta) and tan(theta / 2)
+
+# Per-event species counts derived from pdgId; keys become event-level variable
+# suffixes (truth_Ng, pflow_Nn, ...).
+SPECIES_COUNTS: dict[str, int] = {"Ng": PHOTON_PDGID, "Nn": NEUTRON_PDGID}
+
+
+def theta_to_eta(theta: np.ndarray) -> np.ndarray:
+    """Polar angle (rad) -> pseudorapidity, ``eta = -ln(tan(theta / 2))``.
+
+    Only for interop with post-eval code that is still written in terms of eta
+    (acceptance cut, four-vectors, dR matching, jet clustering). The pipeline
+    itself reads ``theta`` straight from the input files, and ``theta`` is what
+    gets written back out.
+
+    Args:
+        theta: Polar angle in radians. Clamped to ``[THETA_MIN, pi - THETA_MIN]``
+            first, since a generated theta is not guaranteed to lie in ``(0, pi)``.
+
+    Returns:
+        Pseudorapidity array.
+    """
+    theta = np.clip(theta, THETA_MIN, np.pi - THETA_MIN)
+    return -np.log(np.tan(theta / 2.0))
+
+
+def segment_sum(
+    values: np.ndarray,
+    n_particles: np.ndarray,
+    cumsum: np.ndarray,
+) -> np.ndarray:
+    """Per-event sum of a flat particle array, returning 0.0 for empty events.
+
+    ``np.add.reduceat`` cannot be used directly once a collection is allowed to
+    have zero particles in an event (the event stage keeps ``npflow == 0``
+    events).  For a zero-length segment it returns ``values[start]`` — the *next*
+    event's first entry — rather than the additive identity, and it raises
+    ``IndexError`` when a trailing segment starts at ``len(values)``.
+
+    Trailing empty events are handled by dropping their start indices before the
+    reduction (the last retained segment then correctly runs to the end of
+    ``values``); interior empty events are reduced normally and zeroed after.
+
+    Args:
+        values: Flat concatenated per-particle array.
+        n_particles: Per-event particle counts, shape ``(n_events,)``.
+        cumsum: Cumulative sum array, shape ``(n_events + 1,)``.
+
+    Returns:
+        Per-event sums, shape ``(n_events,)``, ``float32``.
+    """
+    n_events = len(n_particles)
+    out = np.zeros(n_events, dtype=np.float32)
+    if len(values) == 0:
+        return out
+
+    starts = cumsum[:-1]
+    # Trailing empty events have start == len(values); drop them before reducing.
+    n_valid = int(np.searchsorted(starts, len(values), side="left"))
+    if n_valid > 0:
+        out[:n_valid] = np.add.reduceat(values, starts[:n_valid])
+    out[n_particles == 0] = 0.0
+    return out
+
 
 def get_pv_coords(vertex_array: np.ndarray) -> np.ndarray:
     """Get primary vertex coordinates from truth vertices (majority vote).
@@ -81,6 +149,8 @@ class ComputedVariables:
     - d0Sig, z0Sig: Impact parameter significance (IP / error)
     - means: Per-event mean of context variables
     - ht, met_x, met_y, ptrel, charge: Event/particle-level aggregates
+    - Ng, Nn: Per-event photon / neutron multiplicity, from pdgId
+    - Pxh, Pyh: Per-event hadronic (non-electron) px / py sum, from pdgId
     - PV coordinates, vz_shifted, d0My/z0My: From vertex positions
     """
 
@@ -138,13 +208,14 @@ class ComputedVariables:
         Returns:
             Array of shape (n_events, n_vars) with per-event means
         """
-        # Filter out class and charge variables
+        # Filter out class, charge, and pdgId variables
         filtered_vars = [
             v
             for v in var_names
             if v.startswith(f"{collection_name}_")
             and "class" not in v
             and "charge" not in v
+            and "pdgId" not in v
         ]
 
         n_events = len(n_particles)
@@ -152,13 +223,12 @@ class ComputedVariables:
         means = np.zeros((n_events, n_vars), dtype=np.float32)
 
         for i, var in enumerate(tqdm(filtered_vars, desc="Calculating means")):
-            # Use reduceat to efficiently compute sums for each event
-            means[:, i] = (
-                np.add.reduceat(
-                    particle_data[var],
-                    cumsum[:-1],
-                )
-                / n_particles
+            # segment_sum tolerates empty events; the mean of one is left at 0.
+            means[:, i] = np.divide(
+                segment_sum(particle_data[var], n_particles, cumsum),
+                n_particles,
+                out=np.zeros(n_events, dtype=np.float32),
+                where=n_particles > 0,
             )
 
         return means
@@ -171,6 +241,7 @@ class ComputedVariables:
         cumsum: np.ndarray,
         pdgId_flat: np.ndarray | None = None,
         class_flat: np.ndarray | None = None,
+        p_flat: np.ndarray | None = None,
     ) -> dict[str, np.ndarray]:
         """Compute ht, met_x, met_y, ptrel, charge from flat concatenated arrays.
 
@@ -182,24 +253,27 @@ class ComputedVariables:
             phi_flat: Flat concatenated phi array.
             n_particles: Per-event particle counts, shape ``(n_events,)``.
             cumsum: Cumulative sum array, shape ``(n_events + 1,)``.
-            pdgId_flat: Flat concatenated pdgId (optional, for charge).
+            pdgId_flat: Flat concatenated pdgId (optional, for charge and the
+                species-based event variables).
             class_flat: Flat concatenated class (optional, for charge).
+            p_flat: Flat concatenated momentum magnitude (optional). When
+                given, ``ht_p``, the p analogue of ht (event-level scalar sum
+                of p), is added.
 
         Returns:
             Dict with keys ``ht``, ``met_x``, ``met_y`` (event-level,
             shape ``(n_events,)``), ``ptrel`` (particle-level, same
-            length as ``pt_flat``), and optionally ``charge``.
+            length as ``pt_flat``), and optionally ``charge``.  When
+            ``pdgId_flat`` is supplied, the event-level species counts
+            (``Ng``, ``Nn`` — see ``SPECIES_COUNTS``) and hadronic momentum
+            sums (``Pxh``, ``Pyh``) are added.
         """
         n_events = len(n_particles)
 
-        # Event-level aggregates via reduceat
-        ht = np.add.reduceat(pt_flat, cumsum[:-1]).astype(np.float32)
-        met_x = np.add.reduceat(pt_flat * np.cos(phi_flat), cumsum[:-1]).astype(
-            np.float32
-        )
-        met_y = np.add.reduceat(pt_flat * np.sin(phi_flat), cumsum[:-1]).astype(
-            np.float32
-        )
+        # Event-level aggregates; segment_sum yields 0.0 for empty events.
+        ht = segment_sum(pt_flat, n_particles, cumsum)
+        met_x = segment_sum(pt_flat * np.cos(phi_flat), n_particles, cumsum)
+        met_y = segment_sum(pt_flat * np.sin(phi_flat), n_particles, cumsum)
 
         # ptrel: broadcast event-level ht to particle level
         event_idx = np.repeat(np.arange(n_events), n_particles)
@@ -218,12 +292,88 @@ class ComputedVariables:
             "ptrel": ptrel,
         }
 
+        if p_flat is not None:
+            result["ht_p"] = segment_sum(p_flat, n_particles, cumsum)
+
+        if pdgId_flat is not None:
+            result.update(
+                ComputedVariables.compute_flat_counts(pdgId_flat, n_particles, cumsum)
+            )
+            result.update(
+                ComputedVariables.compute_flat_hadronic_missing_p(
+                    pdgId_flat, pt_flat, phi_flat, n_particles, cumsum
+                )
+            )
+
         if pdgId_flat is not None and class_flat is not None:
             charge = np.sign(pdgId_flat).astype(np.float32)
             # charge[class_flat > 2] = 0
             result["charge"] = charge
 
         return result
+
+    @staticmethod
+    def compute_flat_counts(
+        pdgid_flat: np.ndarray,
+        n_particles: np.ndarray,
+        cumsum: np.ndarray,
+    ) -> dict[str, np.ndarray]:
+        """Per-event multiplicity of each species in ``SPECIES_COUNTS``.
+
+        Species are matched on the exact pdgId, so antiparticles are not folded
+        into their particle's count.
+
+        Args:
+            pdgid_flat: Flat concatenated pdgId array.
+            n_particles: Per-event particle counts, shape ``(n_events,)``.
+            cumsum: Cumulative sum array, shape ``(n_events + 1,)``.
+
+        Returns:
+            Dict keyed by ``SPECIES_COUNTS`` name (``Ng``, ``Nn``), each shape
+            ``(n_events,)``, ``float32``.  Empty events count 0.
+        """
+        return {
+            name: segment_sum(
+                (pdgid_flat == pdgid).astype(np.float32), n_particles, cumsum
+            )
+            for name, pdgid in SPECIES_COUNTS.items()
+        }
+
+    @staticmethod
+    def compute_flat_hadronic_missing_p(
+        pdgid_flat: np.ndarray,
+        pt_flat: np.ndarray,
+        phi_flat: np.ndarray,
+        n_particles: np.ndarray,
+        cumsum: np.ndarray,
+    ) -> dict[str, np.ndarray]:
+        """Per-event transverse momentum sum of the hadronic system.
+
+        The vector sum of px/py over every particle that is not an electron
+        (``pdgId == 11``); positrons are kept.  This is the visible hadronic
+        momentum, not its negative (the "missing" momentum).
+
+        Args:
+            pdgid_flat: Flat concatenated pdgId array.
+            pt_flat: Flat concatenated pt array.
+            phi_flat: Flat concatenated phi array.
+            n_particles: Per-event particle counts, shape ``(n_events,)``.
+            cumsum: Cumulative sum array, shape ``(n_events + 1,)``.
+
+        Returns:
+            Dict with keys ``Pxh`` and ``Pyh``, each shape ``(n_events,)``,
+            ``float32``.  Events with no hadrons get ``Pxh = 0`` and
+            ``Pyh = 0``.
+        """
+        # Zero electrons rather than dropping them, so the arrays stay aligned
+        # with the per-event cumsum offsets.
+        is_hadron = pdgid_flat != ELECTRON_PDGID
+        px = np.where(is_hadron, pt_flat * np.cos(phi_flat), 0.0)
+        py = np.where(is_hadron, pt_flat * np.sin(phi_flat), 0.0)
+        return {
+            "Pxh": segment_sum(px, n_particles, cumsum),
+            "Pyh": segment_sum(py, n_particles, cumsum),
+        }
 
     @staticmethod
     def compute_ragged_pv_coords(

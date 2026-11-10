@@ -1,0 +1,310 @@
+# Feature scaling for the v8 / v8.1 CLAS12 models (scale_dict of configs/v8/* and
+# evaluation/configs/v8/*).
+#
+# Provenance: the statistics were computed on the v8 samples with
+# preprocessing/scaling/calculate_transforms_batched.py (--split-class for the
+# per-pdgId blocks below), and the file was then edited by hand:
+#   - entries the v8 models do not use are commented out (pt, prel, ptrel, ht,
+#     met_x, met_y; v8 trains on p and the p-based event sums),
+#   - the pdgId_45 (deuteron) block is dropped, since v8 has no deuterons,
+#   - the explanatory comments were added.
+# The exact scaling command and config of that run were not recorded. The values
+# below are the ones the paper models were trained and evaluated with; changing
+# them invalidates the v8.1 checkpoints.
+#
+# pt:
+#   mean: 0.4438
+#   std: 0.3704
+#   min: 0.0
+#   max: 5.9535
+p:
+  mean: 1.6462
+  std: 1.6668
+  min: 0.0
+  max: 11.4368
+# prel:
+#   mean: 0.1615
+#   std: 0.1725
+#   min: 0.0
+#   max: 1.0
+ht_p:
+  mean: 10.1939
+  std: 2.8173
+  min: 0.2678
+  max: 55.6459
+theta:
+  mean: 0.4152
+  std: 0.3406
+  min: 0.0175
+  max: 3.1416
+phi:
+  mean: -0.0173
+  std: 1.8171
+  min: -3.1416
+  max: 3.1416
+# ptrel:
+#   mean: 0.1615
+#   std: 0.1488
+#   min: 0.0
+#   max: 1.0
+# Vertex: pflow charged particles only (pdgid_class_dict class < 3). asinh with
+# fn_shift = -median and fn_scale = IQR; mean/std are of the transformed values.
+vx: &vx
+  mean: 0.0007
+  std: 1.0992
+  min: -4.5638
+  max: 4.5634
+  fn: asinh
+  fn_scale: 0.4168
+  fn_shift: 0.0004
+vy: &vy
+  mean: -0.0006
+  std: 1.0983
+  min: -4.5462
+  max: 4.5458
+  fn: asinh
+  fn_scale: 0.4241
+  fn_shift: -0.0002
+vz: &vz
+  mean: 0.005
+  std: 0.6962
+  min: -3.2564
+  max: 3.1407
+  fn: asinh
+  fn_scale: 2.8573
+  fn_shift: 2.971
+# ht:
+#   mean: 2.7482
+#   std: 0.9119
+#   min: 0.1313
+#   max: 18.9869
+Q2:
+  mean: 0.9182
+  std: 0.3806
+  min: -5.7995
+  max: 2.5908
+  fn: log
+W:
+  mean: 3.1413
+  std: 0.5944
+  min: 0.0
+  max: 4.4424
+npart:
+  mean: 6.1923
+  std: 2.6939
+  min: 1.0
+  max: 44.0
+# met_x:
+#   mean: 0.0026
+#   std: 0.5746
+#   min: -12.9161
+#   max: 12.4559
+# met_y:
+#   mean: -0.0057
+#   std: 0.5813
+#   min: -12.8373
+#   max: 11.7632
+Pxh:
+  mean: -0.0103
+  std: 0.85
+  min: -13.9145
+  max: 13.1916
+Pyh:
+  mean: 0.0061
+  std: 0.8572
+  min: -13.3855
+  max: 12.6792
+Ng:
+  mean: 2.167
+  std: 1.8868
+  min: 0.0
+  max: 28.0
+Nn:
+  mean: 0.8984
+  std: 1.2289
+  min: 0.0
+  max: 33.0
+xB:
+  mean: 0.2445
+  std: 0.1151
+  min: 0.0002
+  max: 2.0284
+beta: &beta
+  mean: 0.951
+  std: 0.1004
+  min: 0.0
+  max: 2.0
+# Per-pdgId particle transforms (data.class_based_scaling). Each particle uses the
+# block of its pdgId bucketed like the pdgId one-hot (utils/pid.py
+# pid_onehot_ids); species without a bucket use pdgId_0 (truth K0L, anti-neutrons
+# and mu+-: 0.9% of truth particles, none in pflow). v8 has no deuterons,
+# so there is no pdgId_45 block. In this mode a per-particle variable missing
+# from the particle's block is passed through unscaled, so every block lists
+# every scaled per-particle variable.
+# p and theta: per-pdgId stats, truth and pflow combined. beta, vx, vy and vz
+# alias the global entries.
+pdgId_22:
+  p:
+    mean: 0.6222
+    std: 0.6698
+    min: 0.0004
+    max: 9.843
+  theta:
+    mean: 0.5016
+    std: 0.4293
+    min: 0.0175
+    max: 3.1416
+  beta: *beta
+  vx: *vx
+  vy: *vy
+  vz: *vz
+pdgId_11:
+  p:
+    mean: 4.1485
+    std: 1.9578
+    min: 0.0
+    max: 10.0266
+  theta:
+    mean: 0.2743
+    std: 0.1137
+    min: 0.0175
+    max: 3.1416
+  beta: *beta
+  vx: *vx
+  vy: *vy
+  vz: *vz
+pdgId_-11:
+  p:
+    mean: 0.9694
+    std: 1.3546
+    min: 0.0001
+    max: 9.4749
+  theta:
+    mean: 0.4825
+    std: 0.4371
+    min: 0.0175
+    max: 3.1416
+  beta: *beta
+  vx: *vx
+  vy: *vy
+  vz: *vz
+pdgId_211:
+  p:
+    mean: 1.312
+    std: 1.0556
+    min: 0.0009
+    max: 10.5382
+  theta:
+    mean: 0.4603
+    std: 0.3727
+    min: 0.0175
+    max: 3.1416
+  beta: *beta
+  vx: *vx
+  vy: *vy
+  vz: *vz
+pdgId_-211:
+  p:
+    mean: 1.1259
+    std: 0.9716
+    min: 0.0006
+    max: 10.473
+  theta:
+    mean: 0.4967
+    std: 0.383
+    min: 0.0175
+    max: 3.1387
+  beta: *beta
+  vx: *vx
+  vy: *vy
+  vz: *vz
+pdgId_321:
+  p:
+    mean: 2.3193
+    std: 1.3438
+    min: 0.0097
+    max: 10.4486
+  theta:
+    mean: 0.2923
+    std: 0.1868
+    min: 0.0175
+    max: 2.9886
+  beta: *beta
+  vx: *vx
+  vy: *vy
+  vz: *vz
+pdgId_-321:
+  p:
+    mean: 2.0744
+    std: 1.3238
+    min: 0.0164
+    max: 10.3352
+  theta:
+    mean: 0.31
+    std: 0.1901
+    min: 0.0175
+    max: 3.0777
+  beta: *beta
+  vx: *vx
+  vy: *vy
+  vz: *vz
+pdgId_2212:
+  p:
+    mean: 2.0058
+    std: 1.0212
+    min: 0.1021
+    max: 11.4368
+  theta:
+    mean: 0.3089
+    std: 0.1546
+    min: 0.0175
+    max: 1.1601
+  beta: *beta
+  vx: *vx
+  vy: *vy
+  vz: *vz
+pdgId_-2212:
+  p:
+    mean: 2.7895
+    std: 1.3235
+    min: 0.4149
+    max: 10.5896
+  theta:
+    mean: 0.2258
+    std: 0.1205
+    min: 0.0175
+    max: 0.7664
+  beta: *beta
+  vx: *vx
+  vy: *vy
+  vz: *vz
+pdgId_2112:
+  p:
+    mean: 1.7394
+    std: 1.0847
+    min: 0.0
+    max: 10.9851
+  theta:
+    mean: 0.3344
+    std: 0.1344
+    min: 0.0175
+    max: 1.1653
+  beta: *beta
+  vx: *vx
+  vy: *vy
+  vz: *vz
+pdgId_0:
+  p:
+    mean: 1.9799
+    std: 1.2272
+    min: 0.0114
+    max: 9.5168
+  theta:
+    mean: 0.2919
+    std: 0.1992
+    min: 0.0175
+    max: 3.1213
+  beta: *beta
+  vx: *vx
+  vy: *vy
+  vz: *vz

@@ -30,6 +30,7 @@ class ParnassusDataModule(LightningDataModule):
         ctxt_mask_type: Literal["all", "charged", "neutral"] = "all",
         recalculate_ip: bool = False,
         class_based_scaling: bool = False,
+        eta_clamp: tuple[float, float] | None = (-3.0, 3.0),
         num_test: int = -1,
         test_batch_size: int = 100,
         entry_start_train: int = 0,
@@ -72,6 +73,7 @@ class ParnassusDataModule(LightningDataModule):
         self.ctxt_mask_type = ctxt_mask_type
         self.recalculate_ip = recalculate_ip
         self.class_based_scaling = class_based_scaling
+        self.eta_clamp = eta_clamp
 
     def setup_dataset(self, path: str, num_events: int, entry_start: int, mode: str):
         print(f"Setting up dataset for {mode} with path: {path}")
@@ -92,7 +94,7 @@ class ParnassusDataModule(LightningDataModule):
             "class_based_scaling": self.class_based_scaling,
         }
         if path.endswith(".root"):
-            return EagerDataset(**args)
+            return EagerDataset(**args, eta_clamp=self.eta_clamp)
         elif path.endswith(".h5"):
             return StreamingDataset(**args)
         raise ValueError(f"Expected file to end with .h5 or .root, got {path}")

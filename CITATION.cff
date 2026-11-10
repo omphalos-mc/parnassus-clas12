@@ -1,0 +1,27 @@
+# TODO before release: fill in the paper title, the full author list (with ORCIDs if
+# wanted), the arXiv ID / DOI, and the code DOI from the Zenodo release.
+cff-version: 1.2.0
+message: "If you use this software, please cite the paper below."
+title: "Parnassus fast simulation of CLAS12 (RG-A Fall 2018 inbending)"
+type: software
+authors:
+  - family-names: Hellstern
+    given-names: Tyler
+  - family-names: Kobylianskii
+    given-names: Dmitrii
+license: MIT
+repository-code: "https://github.com/tjayhllstrn/parnassus-core-clas12-configs"
+version: "paper-v1"
+preferred-citation:
+  type: article
+  title: "TODO: paper title"
+  authors:
+    - family-names: Hellstern
+      given-names: Tyler
+    - family-names: Kobylianskii
+      given-names: Dmitrii
+  # identifiers:
+  #   - type: other
+  #     value: "arXiv:TODO"
+  #   - type: doi
+  #     value: "TODO"

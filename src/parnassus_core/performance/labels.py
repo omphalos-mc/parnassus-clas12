@@ -5,14 +5,20 @@ VAR_LABELS = {
     "ht": r"$H_{T}$",
     "met_x": r"$E_{x}^{\mathrm{miss}}$",
     "met_y": r"$E_{y}^{\mathrm{miss}}$",
+    "ht_p": r"$\sum p$",
+    "Pxh": r"$H_{x}$",
+    "Pyh": r"$H_{y}$",
     # Particle variables
     "pt": r"$p_{T}$",
+    "p": r"$p$",
     "eta": r"$\eta$",
+    "theta": r"$\theta$",
     "phi": r"$\phi$",
     "mass": r"$m$",
     "vx": r"$v_{x}$",
     "vy": r"$v_{y}$",
     "vz": r"$v_{z}$",
+    "beta": r"$\beta$",
     # Impact parameter variables
     "d0": r"$d_{0}$",
     "d0Error": r"$\sigma_{d_{0}}$",
@@ -26,6 +32,12 @@ VAR_LABELS = {
     # Substructure variables
     "d2": r"$\ln D_2$",
     "c2": r"$C_2$",
+    # DIS kinematics
+    "Q2": r"$Q^2$",
+    "xB": r"$x_B$",
+    "W": r"$W$",
+    "y": r"$y$",
+    "nu": r"$\nu$",
 }
 
 RESIDUAL_VAR_LABELS = {
@@ -35,17 +47,29 @@ RESIDUAL_VAR_LABELS = {
     "ht_res": r"Residual $H_T$",
     "met_x_res": r"Residual $E_{x}^{\mathrm{miss}}$",
     "met_y_res": r"Residual $E_{y}^{\mathrm{miss}}$",
+    "ht_p_res": r"Residual $\sum p$",
+    "Pxh_res": r"Residual $H_{x}$",
+    "Pyh_res": r"Residual $H_{y}$",
     # Particle variables
     "pt_res": r"$p_{T}$",
+    "p_res": r"$p$",
     "eta_res": r"$\eta$",
+    "theta_res": r"$\theta$",
     "phi_res": r"$\phi$",
     "mass_res": r"$m$",
     "vx_res": r"$v_{x}$",
     "vy_res": r"$v_{y}$",
     "vz_res": r"$v_{z}$",
+    "beta_res": r"$\beta$",
     # Substructure variables
     "d2_res": r"$\ln D_2$",
     "c2_res": r"$C_2$",
+    # DIS kinematics (relative residuals)
+    "Q2_res": r"Rel. Residual $Q^2$",
+    "xB_res": r"Rel. Residual $x_B$",
+    "W_res": r"Rel. Residual $W$",
+    "y_res": r"Rel. Residual $y$",
+    "nu_res": r"Rel. Residual $\nu$",
 }
 
 COLORS = [
@@ -68,4 +92,7 @@ SAMPLE_LABELS = {
     "qcd_600": r"QCD $600$",
     "qcd15to3000": r"QCD $15-3000$",
     "dyjets": r"$Z/\gamma^* \to \ell\ell$",
+    # CLAS12 RGA
+    "clasdis": r"CLAS12 RGA",
+    "dvcs": r"dvcs",
 }

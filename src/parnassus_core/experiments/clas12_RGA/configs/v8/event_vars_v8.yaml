@@ -1,0 +1,46 @@
+truth_vars_to_load:
+  - truth_p
+  - truth_theta
+  - truth_phi
+  - truth_beta
+  - truth_vx
+  - truth_vy
+  - truth_vz
+  - truth_pdgId
+
+pflow_vars_to_load:
+  - pflow_p
+  - pflow_theta
+  - pflow_phi
+  - pflow_beta
+  - pflow_vx
+  - pflow_vy
+  - pflow_vz
+  - pflow_pdgId
+
+fs_vars:
+  - npflow
+  - pflow_ht_p
+  - pflow_Pxh
+  - pflow_Pyh
+  - pflow_Ng
+  - pflow_Nn
+
+ctxt_vars:
+  - truth_p
+  - truth_theta
+  - truth_phi
+  - truth_beta
+  - truth_vx
+  - truth_vy
+  - truth_vz
+  - truth_pdgId
+
+ctxt_global_vars:
+  - means
+  - ntruth
+  - truth_ht_p
+  - truth_Pxh
+  - truth_Pyh
+  - truth_Ng
+  - truth_Nn

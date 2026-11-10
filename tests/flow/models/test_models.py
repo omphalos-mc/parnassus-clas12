@@ -333,6 +333,47 @@ class TestParticleNetwork:
             rtol=1e-3,
         )
 
+    @pytest.mark.parametrize("input_data", ["particle"], indirect=True)
+    @pytest.mark.parametrize("attn_type", ["torch", "flex"])
+    def test_padding_invariance(
+        self,
+        input_data,
+        attn_type,
+        particle_network,
+    ):
+        """Slicing off slots every event pads leaves the real outputs unchanged.
+
+        ``EvaluationModel`` with ``trim_padding`` relies on this to hand the
+        network only the slots some event in the batch fills.
+        """
+        if not HAS_GPU and attn_type in ATTN_TYPES_GPU:
+            pytest.skip("Skipping GPU-specific test on CPU-only environment")
+        fs_data, timestep, ctxt_dict = input_data
+        # fp32, so a real mismatch cannot hide behind fp16 rounding.
+        particle_network.float().change_backend(attn_type)
+        fs_data, timestep = fs_data.float(), timestep.float()
+        slots = torch.arange(SEQ_LEN, device=DEVICE)
+        fs_counts = torch.tensor([1, 5, 8, 3], device=DEVICE)
+        ctxt_counts = torch.tensor([2, 8, 6, 4], device=DEVICE)
+        ctxt_dict = {
+            "ctxt_data": ctxt_dict["ctxt_data"].float(),
+            "ctxt_global_data": ctxt_dict["ctxt_global_data"].float(),
+            "ctxt_mask": slots < ctxt_counts[:, None],
+            "fs_mask": slots < fs_counts[:, None],
+        }
+        fs_len, ctxt_len = int(fs_counts.max()), int(ctxt_counts.max())
+        trimmed = ctxt_dict | {
+            "ctxt_data": ctxt_dict["ctxt_data"][:, :ctxt_len],
+            "ctxt_mask": ctxt_dict["ctxt_mask"][:, :ctxt_len],
+            "fs_mask": ctxt_dict["fs_mask"][:, :fs_len],
+        }
+
+        output, _ = particle_network(fs_data, timestep, ctxt_dict)
+        output_trimmed, _ = particle_network(fs_data[:, :fs_len], timestep, trimmed)
+
+        fs_mask = trimmed["fs_mask"]
+        torch.testing.assert_close(output_trimmed[fs_mask], output[:, :fs_len][fs_mask])
+
 
 class TestImpactNetwork:
     @pytest.fixture

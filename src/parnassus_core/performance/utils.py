@@ -5,6 +5,9 @@ from tqdm import tqdm
 
 
 #### Common functions
+_COLLECTIONS = ("pflow", "fastsim", "truth")
+
+
 def load_data(filepath, entry_stop=None, load_cms=False):
     with uproot.open(
         filepath,
@@ -17,22 +20,31 @@ def load_data(filepath, entry_stop=None, load_cms=False):
             data["pflow"] = {}
             data["truth"] = {}
         tree = f["evt_tree"]
-        varnames = tree.keys()
-        if not load_cms:
-            varnames = [
-                var for var in varnames if "pflow" not in var and "truth" not in var
-            ]
-        arrays = tree.arrays(library="np", entry_stop=entry_stop)
+        # Read branch-by-branch and detect the collection from a "coll." (nested
+        # record) or "coll_" (flat) prefix, so the loader is agnostic to the
+        # output layout. tree.arrays() cannot be used here: its expression parser
+        # treats the "." in nested sub-branch names ("truth.pt") as attribute
+        # access and silently drops them; tree[name].array() resolves both.
         for var in tree.keys():
-            if not load_cms and ("pflow" in var or "truth" in var):
+            # Skip the bare nested-record parent ("truth"/"pflow"/"fastsim"); its
+            # sub-branches ("truth.pt", ...) are read individually below.
+            if var in _COLLECTIONS:
                 continue
-            arr = arrays[var]
-            if "pflow" in var:
-                data["pflow"][var.replace("pflow_", "", 1)] = arr
-            elif "fastsim" in var:
-                data["fastsim"][var.replace("fastsim_", "", 1)] = arr
-            elif "truth" in var:
-                data["truth"][var.replace("truth_", "", 1)] = arr
+            collection = next(
+                (
+                    c
+                    for c in _COLLECTIONS
+                    if var.startswith(f"{c}.") or var.startswith(f"{c}_")
+                ),
+                None,
+            )
+            if collection is not None and not load_cms and collection != "fastsim":
+                continue
+            arr = tree[var].array(library="np", entry_stop=entry_stop)
+            if collection is not None:
+                # Strip the "coll." / "coll_" prefix (1 char separator) to get
+                # the field name.
+                data[collection][var[len(collection) + 1 :]] = arr
             else:
                 data[var] = arr
     return data
@@ -43,6 +55,10 @@ def zero_neutral_vtx(data):
         if key not in data:
             continue
         if "vx" not in data[key]:
+            continue
+        # Neutral-vertex zeroing keys off the coarse "class" column; CLAS12 keeps
+        # a real pdgId instead and has no class, so there is nothing to zero here.
+        if "class" not in data[key]:
             continue
         for i in range(len(data[key]["pt"])):
             part_class = data[key]["class"][i]
@@ -117,7 +133,9 @@ def reshape_phi(phi):
 
 def calc_particle_residuals(tr_indices, indices, data, tr_data, varlist=None):
     if varlist is None:
-        varlist = ["pt", "eta", "phi", "vx", "vy", "vz"]
+        # "theta" is the CLAS12 counterpart of "eta"; any one dataset has only one
+        # of them and the next line drops whichever is absent.
+        varlist = ["pt", "eta", "theta", "phi", "vx", "vy", "vz"]
     varlist = [var for var in varlist if var in data]
 
     res = {}

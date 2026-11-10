@@ -34,6 +34,8 @@ Required top-level fields:
 	Mapping with:
 	- `top_folder`: prefix directory used for dataset file paths
 	- `max_particles`: max sequence length for EagerDataset
+	- `eta_clamp`: optional `[min, max]` pair that eta is clipped to when loading (default `[-3.0, 3.0]`, the CMS range). **Must match the `eta_clamp` used in training** — the clamp reassigns out-of-range eta rather than dropping particles, so a mismatch silently feeds out-of-distribution conditioning to the models. Set `null` to disable clipping. CLAS12 uses `[-3.0, 5.0]`.
+	- `class_based_scaling`: optional boolean (default `false`). Scales per-particle variables with the `class_N` / `pdgId_N` blocks of `scale_dict`, for both the truth conditioning and the unscaling of generated particles. **Must match `data.class_based_scaling` in the training config** — a mismatch silently mis-scales both.
 	- `datasets`: list of dataset definitions
         Each data.datasets entry:
         - `name`: output stem for this dataset

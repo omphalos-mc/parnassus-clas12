@@ -7,7 +7,11 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 class Checkpoint(ModelCheckpoint):
     def __init__(self, monitor: str = "val/loss", **kwargs) -> None:
         filename = (
-            "epoch={epoch:03d}-" + monitor.replace("/", "_") + "={" + monitor + ":.5f}"
+            "epoch={epoch:03d}-step={step:06d}-"
+            + monitor.replace("/", "_")
+            + "={"
+            + monitor
+            + ":.5f}"
         )
         super().__init__(
             save_top_k=-1,

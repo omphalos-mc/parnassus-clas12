@@ -59,6 +59,7 @@ cover/
 # Jupyter Notebook
 .ipynb_checkpoints
 
+
 # IPython
 profile_default/
 ipython_config.py
@@ -144,3 +145,26 @@ evals
 # Allow pbs
 !src/parnassus_core/preprocessing/pbs/*.py
 !src/parnassus_core/preprocessing/pbs/*.yaml
+
+#claude code
+CLAUDE.md
+context/*
+tasks/*
+src/parnassus_core/experiments/clas12_RGA/configs/config_file_explanation.md
+.claude/
+
+#bash submission scripts
+src/parnassus_core/preprocessing/scaling/submit_scaling_clas12.sh
+submit_particle_training.sh
+submit_event_training.sh
+setup.sh
+slurm/*
+setup.sh~
+error.txt
+trained_models/*
+filter_npflow0.C
+logs_perlmutter/*
+
+# Local evaluation outputs and editor backups
+clasdis_*/
+*~

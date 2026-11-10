@@ -25,6 +25,8 @@ import hdf5plugin  # noqa: F401
 import numpy as np
 import yaml
 from tqdm import tqdm
+from parnassus_core.utils.pid import pdgid_class_dict
+
 
 from parnassus_core.preprocessing.scaling.config import (
     RuntimeConfig,
@@ -33,6 +35,7 @@ from parnassus_core.preprocessing.scaling.transforms import (
     OnlineStats,
     apply_custom_transform,
     get_deferred_configs,
+    get_simple_configs,
 )
 from parnassus_core.preprocessing.scaling.utils import (
     attach_transform_metadata,
@@ -45,6 +48,47 @@ from parnassus_core.preprocessing.scaling.utils import (
     resolve_particle_bases,
     round_floats,
 )
+
+# Sorted-key lookup table for the pdgId -> class map, so the translation is a
+# single searchsorted instead of one boolean pass per pdgId in the dict.
+_PDGID_KEYS = np.array(sorted(pdgid_class_dict), dtype=np.int64)
+_PDGID_CLASSES = np.array([pdgid_class_dict[pid] for pid in _PDGID_KEYS], dtype=np.int8)
+_RESIDUAL_CLASS = 5
+
+
+def pdgId_to_class(pdgid: np.ndarray, default: int = _RESIDUAL_CLASS) -> np.ndarray:
+    """Map pdgId values to coarse class ids (see ``utils.pid.pdgid_class_dict``).
+
+    Numpy counterpart of ``utils.pid.pdgid_to_class`` (which is torch-only).
+    Works on any shape, integer or float dtype; unknown pdgIds map to ``default``
+    (5, "residual"). Padded slots carry pdgId 0, which the table already maps to
+    5, and are masked off by ``valid`` downstream either way.
+    """
+    pdg = np.rint(np.asarray(pdgid)).astype(np.int64, copy=False)
+    idx = np.searchsorted(_PDGID_KEYS, pdg).clip(0, len(_PDGID_KEYS) - 1)
+    return np.where(
+        _PDGID_KEYS[idx] == pdg, _PDGID_CLASSES[idx], np.int8(default)
+    ).astype(np.int8, copy=False)
+
+
+def ensure_class_field(data: np.ndarray) -> np.ndarray:
+    """Return ``data`` with a ``class`` field, deriving it from ``pdgId`` if absent.
+
+    A structured array's fields are fixed at allocation, so adding ``class``
+    means a new array; the raw batch is returned unchanged (no copy) whenever
+    ``class`` already exists, which is the CMS case.
+    """
+    names = data.dtype.names or ()
+    if "class" in names or "pdgId" not in names:
+        return data
+
+    out = np.empty(
+        data.shape, dtype=[*[(n, data.dtype[n]) for n in names], ("class", "i1")]
+    )
+    for name in names:
+        out[name] = data[name]
+    out["class"] = pdgId_to_class(data["pdgId"])
+    return out
 
 
 def calculate_event_stats(
@@ -63,6 +107,12 @@ def calculate_event_stats(
     stats = {var: OnlineStats() for var in event_vars}
     recalculate_vars = {"pv_x": "vx", "pv_y": "vy", "pv_z": "vz"}
     precomputed_pv_stats = precomputed_pv_stats or {}
+    # Only the variables declaring an `fn`; the rest accumulate raw values.
+    event_configs = get_simple_configs(event_var_configs, event_vars)
+
+    def _upd(key: str, values: np.ndarray) -> None:
+        cfg = event_configs.get(key)
+        stats[key].update(apply_custom_transform(values, cfg) if cfg else values)
 
     # Open file once and keep it open
     with h5py.File(file_path, "r") as f:
@@ -110,14 +160,14 @@ def calculate_event_stats(
                     continue
 
                 if key in event_names:
-                    stats[key].update(event_data[key])
+                    _upd(key, event_data[key])
                 if var_cfg.common:
                     truth_key = f"truth_{key}"
                     pflow_key = f"pflow_{key}"
                     if truth_key in event_names:
-                        stats[key].update(event_data[truth_key])
+                        _upd(key, event_data[truth_key])
                     if pflow_key in event_names:
-                        stats[key].update(event_data[pflow_key])
+                        _upd(key, event_data[pflow_key])
 
     # Convert to output format
     output = {}
@@ -130,6 +180,8 @@ def calculate_event_stats(
         if stat_obj.count == 0:
             raise ValueError(f"No values found for event variable '{var}'")
         output[var] = stat_obj.get_stats()
+        if var in event_configs:
+            attach_transform_metadata(output[var], event_configs[var])
         print_stats_block(var, output[var])
 
     return output
@@ -186,8 +238,8 @@ def calculate_particle_stats(
     with h5py.File(file_path, "r") as f:
         pflow_dataset = cast(h5py.Dataset, f["pflow"])
         truth_dataset = cast(h5py.Dataset, f["truth"])
-        pflow_data = np.array(0, dtype=pflow_dataset.dtype)
-        truth_data = np.array(0, dtype=truth_dataset.dtype)
+        pflow_raw = np.array(0, dtype=pflow_dataset.dtype)
+        truth_raw = np.array(0, dtype=truth_dataset.dtype)
 
         total_events = len(pflow_dataset) if max_events is None else max_events
         n_batches = (total_events + batch_size - 1) // batch_size
@@ -195,15 +247,19 @@ def calculate_particle_stats(
         for batch_idx in tqdm(range(n_batches), desc="Particle batches"):
             start_idx = batch_idx * batch_size
             end_idx = min(start_idx + batch_size, total_events)
-            pflow_data.resize(
+            pflow_raw.resize(
                 (end_idx - start_idx, *pflow_dataset.shape[1:]), refcheck=False
             )
-            truth_data.resize(
+            truth_raw.resize(
                 (end_idx - start_idx, *truth_dataset.shape[1:]), refcheck=False
             )
 
-            pflow_dataset.read_direct(pflow_data, np.s_[start_idx:end_idx])
-            truth_dataset.read_direct(truth_data, np.s_[start_idx:end_idx])
+            pflow_dataset.read_direct(pflow_raw, np.s_[start_idx:end_idx])
+            truth_dataset.read_direct(truth_raw, np.s_[start_idx:end_idx])
+
+            # If the dataset has no class label, derive it from pdgId.
+            pflow_data = ensure_class_field(pflow_raw)
+            truth_data = ensure_class_field(truth_raw)
 
             # Calculate ptrel for pflow and truth
             pflow_pt = pflow_data["pt"]
@@ -499,11 +555,14 @@ def main():
         precomputed_pv_stats=precomputed_pv_stats,
     )
 
-    # Combine and save
-    output_data = {
-        "event_vars": event_stats,
-        "particle_vars": particle_stats,
-    }
+    # Combine and save. Flat layout consumed by FeatureScaler: top-level var
+    # keys (pt, eta, ...) + top-level class_N blocks (no event_vars/particle_vars
+    # wrapper, which FeatureScaler would treat as bogus variable names).
+    output_data = {**particle_stats, **event_stats}
+    by_class = output_data.pop("by_class", None)
+    if by_class is not None:
+        output_data.update(by_class)  # class_0..4 -> top level
+
     output_data = normalize_dump_convention(output_data)
     output_data = round_floats(output_data, digits=4)
 
