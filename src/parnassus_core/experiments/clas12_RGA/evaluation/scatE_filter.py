@@ -38,7 +38,7 @@ Example
 
     python -m parnassus_core.experiments.clas12_RGA.evaluation.scatE_filter \
         -i ../parnassus_data/v8/v8_test.root \
-        -o ../parnassus_data/v8/v8_test_scatE_sample.root \
+        -o ../parnassus_data/v8/v8_test_filtered.root \
         --mode sample --n-events 3_000_000 --seed 0
 """
 

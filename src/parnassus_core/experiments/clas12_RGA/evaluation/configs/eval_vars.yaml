@@ -1,14 +1,14 @@
-# eval_vars_v6.yaml for the v6.3 event model, which predicts (pflow - truth).
+# Variables for the full-chain evaluation (evaluation/configs/config.yaml).
 #
-# fs_vars.particle and ctxt_vars must match configs/v6/particle_vars_v6.yaml
-# exactly, in order: EvaluationModel._get_fs_var_idxs walks these lists to
-# compute feature offsets into the generated tensor, so a reordering mis-slices
-# silently rather than raising.
+# fs_vars.event must match the targets of configs/event_vars.yaml, and
+# fs_vars.particle and ctxt_vars must match configs/particle_vars.yaml, exactly
+# and in order: EvaluationModel._get_fs_var_idxs walks these lists to compute
+# feature offsets into the generated tensor, so a reordering mis-slices silently
+# rather than raising.
 #
 # Only the truth collection is loaded here: in eval mode
 # PhysicsDatasetBase._apply_eval_filter keeps only the collections referenced by
-# ctxt_vars, so pflow_Q2 / pflow_W are never computed from data -- the event
-# model generates them, which is the whole point.
+# ctxt_vars, so every pflow variable comes from the models, not from data.
 event_vars: ["eventNumber"]
 vars_to_load:
   truth:

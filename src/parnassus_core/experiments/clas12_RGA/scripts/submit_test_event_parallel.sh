@@ -6,7 +6,7 @@
 # Each (checkpoint, solver) test runs as its own one-GPU job step. With N tests and n
 # allocated tasks ($SLURM_NTASKS), the first n start immediately and each remaining test
 # starts as soon as a running slot finishes.
-# Outputs land in the run dir and are named as in submit_test_particle_v8_parallel.sh:
+# Outputs land in the run dir and are named as in submit_test_particle_parallel.sh:
 # <output_name> = <run_tag>_eventNetTest_<ckpt_tag>[_<EMA/SWA suffix>][_<sampler>]_s<n_steps>,
 # where <run_tag> is the run dir name without its timestamp, <ckpt_tag> is epoch<NNN> for
 # epoch=<NNN>-... checkpoints, or the checkpoint name (last, sigterm) otherwise, and
@@ -21,9 +21,9 @@
 # Allocate 1-4 nodes (4 GPUs each), then run:
 #   salloc -A <account> -C gpu -q interactive -N 2 -t 04:00:00 \
 #       --ntasks-per-node=4 --gpus-per-task=1 --cpus-per-task=32
-#   bash src/parnassus_core/experiments/clas12_RGA/scripts/submit_test_event_v8_parallel.sh [-s pndm:50 -s euler:100 ...] \
+#   bash src/parnassus_core/experiments/clas12_RGA/scripts/submit_test_event_parallel.sh [-s pndm:50 -s euler:100 ...] \
 #       <run_dir>/ckpts/<a>.ckpt <run_dir>/ckpts/<b>.ckpt ...
-#   bash src/parnassus_core/experiments/clas12_RGA/scripts/submit_test_event_v8_parallel.sh [-s pndm:50 ...] -d <run_dir> -e 3,51,90 [-w EMA]
+#   bash src/parnassus_core/experiments/clas12_RGA/scripts/submit_test_event_parallel.sh [-s pndm:50 ...] -d <run_dir> -e 3,51,90 [-w EMA]
 #
 # Each test logs to logs/slurm/<output_name>_<jobid>.log. Failed tests do not stop the
 # others; a summary is printed at the end and the exit code is non-zero if any failed.
@@ -166,7 +166,7 @@ parse_checkpoint() {
         exit 1
     fi
     # Run tag is the run dir name minus its trailing _<YYYYMMDD>-T<HHMMSS> timestamp:
-    # v6_6_xl_clas12_RGA_event_20261010-T182930 -> v6_6_xl_clas12_RGA_event.
+    # clas12_RGA_event_20261029-T220829 -> clas12_RGA_event.
     if [[ ${run_name} =~ ^(.+)_[0-9]{8}-T[0-9]{6}$ ]]; then
         run_tag=${BASH_REMATCH[1]}
     else

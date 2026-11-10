@@ -1,4 +1,4 @@
-# Post-processing config for v8 particle-model tests, union join.
+# Post-processing config for particle-model tests, union join.
 # Consumed by: python -m parnassus_core.evaluation.postprocess_eval -c <this file>
 #
 # Identical to postprocess_union.yaml except for `df: true`. It is meant for the
@@ -35,4 +35,4 @@ join: union
 #   -i logs/<particle run>/<run>_particleNetTest_<k>k.root \
 #   -d <parnassus_data>/v8/v8_test_filtered_truth.root \
 #   -o logs/<particle run>/particleNetTest_postprocess.root -n -1 \
-#   -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/v8/postprocess_df.yaml
+#   -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/postprocess_df.yaml

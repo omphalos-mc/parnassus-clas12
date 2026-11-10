@@ -1,9 +1,9 @@
-name: v8_clas12_RGA_event
+name: clas12_RGA_particle
 
 trainer:
-  num_nodes: 6
+  num_nodes: 10
   devices: 4
-  max_epochs: 100
+  max_epochs: 110
   callbacks:
     - class_path: parnassus_core.flow.callbacks.EMAModelCheckpoint
       init_args:
@@ -11,119 +11,101 @@ trainer:
         save_last: true
     - class_path: parnassus_core.flow.callbacks.EMA
       init_args:
-        decay: 0.9
+        decay: 0.9999
         pct_start: 0.667
         validate_original_weights: true
-
     - class_path: parnassus_core.flow.callbacks.SigtermCheckpoint
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    - class_path: parnassus_core.flow.callbacks.ParticlePerformanceLogger
       init_args:
-        monitor: null
-        save_last: true
-        save_top_k: 0
-        every_n_train_steps: 40000
-    - class_path: parnassus_core.flow.callbacks.EventPerformanceLogger
+        skip_jet_logs: true
+        skip_met_logs: true
     - class_path: lightning.pytorch.callbacks.ModelSummary
       init_args:
         max_depth: 2
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
     - class_path: lightning.pytorch.callbacks.TQDMProgressBar
       init_args:
-        refresh_rate: 50
+        refresh_rate: 100
     - class_path: lightning.pytorch.callbacks.StochasticWeightAveraging
       init_args:
-        swa_lrs: 3e-5
+        swa_lrs: 1e-6
     - class_path: parnassus_core.flow.callbacks.SWACheckpoint
-    - class_path: parnassus_core.flow.callbacks.PredictionWriter
 
 data:
-  num_workers: 20
-  train_type: event
+  train_type: particle
+
   train_path: /global/cfs/cdirs/m3246/tjhellst/parnassus_data/v8/v8_train.root
   valid_path: /global/cfs/cdirs/m3246/tjhellst/parnassus_data/v8/v8_train.root
   num_train: 40_000_000
   num_valid: 500_000
-
   train_batch_size: 800
-
   entry_start_valid: 40_000_000
 
-
-  scale_dict: src/parnassus_core/experiments/clas12_RGA/configs/v8/var_transform_v8.yaml
-  var_dict: src/parnassus_core/experiments/clas12_RGA/configs/v8/event_vars_v8.yaml
-
+  scale_dict: src/parnassus_core/experiments/clas12_RGA/configs/var_transform.yaml
+  var_dict: src/parnassus_core/experiments/clas12_RGA/configs/particle_vars.yaml
   class_based_scaling: true
 
 model:
   optimizer: Lion
   optimizer_kwargs:
     lr: 3e-5
+    weight_decay: 0.01
   lrs_config:
     skip_scheduler: false
     lr_scheduler_type: cosine
     lr_scheduler_kwargs:
-      first_cycle_steps: 100
+      first_cycle_steps: 110
       gamma: 0.85
-      min_lr: 2e-6
+      min_lr: 1e-6
 
   loss:
-    class_path: parnassus_core.flow.utils.MSELoss
+    class_path: parnassus_core.flow.utils.MSEAndDirectionLoss
 
   fm:
     class_path: parnassus_core.flow.utils.FlowMatcher
     init_args:
-      flow_type: icfm
+      flow_type: rcfm
       time_distribution: pow
+      power_alpha: 0.5
 
-  sampler_type: pndm
-  n_steps: 25
+  sampler_type: dpm
+  n_steps: 10
 
   model:
-    class_path: parnassus_core.flow.models.EventNetwork
+    class_path: parnassus_core.flow.models.ParticleNetwork
     init_args:
       time_embedding:
         class_path: parnassus_core.flow.modules.TimestepEmbedder
         init_args:
-          hidden_dim: &dim 640
+          hidden_dim: &dim 128
           time_factor: 1000
       fs_init_net:
         class_path: parnassus_core.flow.modules.DenseNetwork
         init_args:
-          input_dim: 6
-          hidden_dim: &dim2 256
+          input_dim: 20
+          hidden_dim: [*dim, *dim]
           output_dim: *dim
-          act_h: &act GELU
+          act_h: &act SiLU
       ctxt_networks:
         class_path: torch.nn.ModuleList
         init_args:
           modules:
-            - class_path: parnassus_core.experiments.clas12_RGA.modules.SANamedNetwork
+            - class_path: parnassus_core.flow.modules.NamedNetwork
               init_args:
                 input_name: ctxt
                 fields: ["data"]
                 dense_kwargs:
                   input_dim: 20
-                  hidden_dim: *dim2
-                  output_dim: *dim2
+                  hidden_dim: [*dim, *dim]
+                  output_dim: *dim
                   act_h: *act
-                sa_encoder:
-                  class_path: parnassus_core.flow.modules.DiTEncoder
-                  init_args:
-                    hidden_dim: *dim2
-                    num_heads: 4
-                    num_layers: 1
-                    mlp_ratio: 2.0
-                    bidirectional: false
-                    norm: layer
-                    no_modulation: true
-                output_dim: *dim
             - class_path: parnassus_core.flow.modules.NamedNetwork
               init_args:
                 input_name: ctxt_global
                 fields: ["data"]
                 dense_kwargs:
-                  input_dim: 13
-                  hidden_dim: *dim2
+                  input_dim: 19
+                  hidden_dim: [*dim, *dim]
                   output_dim: *dim
                   act_h: *act
       global_embedding:
@@ -131,23 +113,23 @@ model:
         init_args:
           input_names: ["ctxt", "ctxt_global", "time"]
       encoder:
-        class_path: parnassus_core.flow.modules.DenseNetwork
+        class_path: parnassus_core.flow.modules.DiTEncoder
         init_args:
-          input_dim: *dim
           hidden_dim: *dim
-          output_dim: *dim
-          num_blocks: 3
-          n_lyr_pbk: 3
-          do_res: True
-          do_out: False
-          layer_scale: True
-          pre_norm: LayerNorm
-          skip_last_act: True
+          num_heads: 8
+          num_layers: 8
+          attn_type: flex
+          bidirectional: true
+          do_selfattn: false
+          simplify: false
+          mha_config:
+            qk_norm: true
+            bias: false
       fs_out_net:
         class_path: parnassus_core.flow.modules.DenseNetwork
         init_args:
           input_dim: *dim
-          hidden_dim: *dim
-          output_dim: 6
-          ctxt_dim: 1920
+          hidden_dim: [*dim, *dim, *dim]
+          output_dim: 20
           act_h: *act
+          ctxt_dim: 384

@@ -97,7 +97,7 @@ pdgid_class_dict = {
 # Ordered list of pdgIds that each get a dedicated one-hot bucket; the position
 # in this list IS the one-hot index. Any pdgId not listed maps to the trailing
 # "other" bucket at index ``_OTHER_PID_INDEX``. Covers the reconstructed pflow
-# species observed in the v1 CLAS12_RGA sample. Note: the deuteron uses the
+# species observed in the CLAS12 RG-A samples. Note: the deuteron uses the
 # shortened CLAS12 id ``45`` (not the PDG nuclear code 1000010020) so every id
 # here is exactly representable in ``float32``.
 pid_onehot_ids = [22, 11, -11, 211, -211, 321, -321, 2212, -2212, 2112, 45]

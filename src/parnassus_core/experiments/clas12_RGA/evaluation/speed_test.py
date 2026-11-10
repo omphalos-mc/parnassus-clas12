@@ -1,6 +1,6 @@
 """Time every stage of the CLAS12 fast-simulation inference chain on one GPU.
 
-Runs the chain of ``slurm/run_evaluation_chain_v8_1.sh`` (minus postprocessing)
+Runs the chain of ``scripts/run_evaluation_chain.sh`` (minus postprocessing)
 and reports wall time and throughput per stage::
 
     scatE pre-filter   AllEvents ROOT -> read -> features -> classifier
@@ -36,7 +36,7 @@ Example
 ::
 
     python -m parnassus_core.experiments.clas12_RGA.evaluation.speed_test \\
-        -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/v8/config_v8_1.yaml \\
+        -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/config.yaml \\
         --filter-input ../parnassus_data/v8/v8_test.root
 """
 

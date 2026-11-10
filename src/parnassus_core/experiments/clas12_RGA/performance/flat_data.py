@@ -49,14 +49,14 @@ from parnassus_core.performance.performance import (
 # union file that is ~590 MB compressed the shared loader reads and then discards.
 PARTICLE_FIELDS = (
     "pt",
-    "p",  # v7+ files carry p in place of pt; from_flat derives whichever is missing
+    "p",  # files carry p or pt; from_flat derives whichever is missing
     "eta",  # absent on CLAS12 (theta is the variable of record); kept for other files
     "theta",
     "phi",
     "vx",
     "vy",
     "vz",
-    "beta",  # v6+ files carry beta in place of vx/vy
+    "beta",  # absent from some older samples
     "class",
     "pdgId",
     "d0",
@@ -264,7 +264,7 @@ class Clas12FlatData(Data):
             for var in PARTICLE_FIELDS
             if var in collection_data
         }
-        # Event aggregates need pt and the v8+ plots need p, but a file carries only
+        # Event aggregates need pt and the CLAS12 plots need p, but a file carries only
         # one of them (theta in radians), so derive the other as postprocess_eval does.
         if "theta" in particle_data:
             sin_theta = np.sin(np.asarray(particle_data["theta"], dtype=np.float64))
@@ -383,7 +383,7 @@ class Clas12FlatData(Data):
         self.event_data["met_y"] = _segment_sum(pt * np.sin(phi), counts, offsets)
         self.event_data["ht"] = _segment_sum(pt, counts, offsets)
 
-        # p analogues the v8+ event model is trained on: the scalar sum of p, and the
+        # p analogues the event model is trained on: the scalar sum of p, and the
         # hadronic (non-electron) px/py sums, via the same function training uses.
         if "p" in self.particle_data_all:
             p = np.asarray(self.particle_data_all["p"], dtype=np.float64)

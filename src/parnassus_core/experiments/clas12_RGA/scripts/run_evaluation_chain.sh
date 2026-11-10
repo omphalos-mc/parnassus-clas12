@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --constraint=gpu
 #SBATCH --qos=regular
-#SBATCH --job-name=clasdis_v8_1_eval_chain
+#SBATCH --job-name=clasdis_eval_chain
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
@@ -10,7 +10,7 @@
 #SBATCH --output=logs/slurm/%x_%j.out
 #SBATCH --error=logs/slurm/%x_%j.err
 
-# Run the full CLAS12 v8.1 evaluation chain end to end, with the pre-trained scatE
+# Run the full CLAS12 evaluation chain end to end, with the pre-trained scatE
 # classifier supplying the scattered-electron reconstruction efficiency:
 #
 #   1. scatE_filter  --mode sample  : AllEvents -> classifier-filtered fastsim input
@@ -30,11 +30,11 @@
 # src/parnassus_core/experiments/clas12_RGA/README.md.
 #
 # Usage:
-#   sbatch src/parnassus_core/experiments/clas12_RGA/scripts/run_evaluation_chain_v8_1.sh [options]
+#   sbatch src/parnassus_core/experiments/clas12_RGA/scripts/run_evaluation_chain.sh [options]
 #
 #   The paper run (every classifier-kept event of all 29.91M in v8_test.root; postprocess_eval
 #   was then run by hand with -n 6000000, see scripts/README.md):
-#   sbatch src/parnassus_core/experiments/clas12_RGA/scripts/run_evaluation_chain_v8_1.sh --refilter --n-read 29910000 --n-keep 29910000 --suffix v8_filter_29M_test --skip-postprocess
+#   sbatch src/parnassus_core/experiments/clas12_RGA/scripts/run_evaluation_chain.sh --refilter --n-read 29910000 --n-keep 29910000 --suffix _paper --skip-postprocess
 #
 #     --refilter          Rebuild the filtered inputs even if they already exist.
 #     --n-keep N          Target kept events for the sampled input (default 500000).
@@ -90,8 +90,8 @@ cd "${REPO_ROOT}"
 
 # --- Paths ---------------------------------------------------------------
 FILTER=parnassus_core.experiments.clas12_RGA.evaluation.scatE_filter
-CONFIG_DIR=src/parnassus_core/experiments/clas12_RGA/evaluation/configs/v8
-EVAL_CONFIG="${CONFIG_DIR}/config_v8_1.yaml"
+CONFIG_DIR=src/parnassus_core/experiments/clas12_RGA/evaluation/configs
+EVAL_CONFIG="${CONFIG_DIR}/config.yaml"
 POSTPROCESS_CONFIG="${CONFIG_DIR}/postprocess_union.yaml"
 
 # Must agree with EVAL_CONFIG's data.top_folder + datasets[0].path, since
@@ -101,8 +101,8 @@ SAMPLE_ROOT="${DATA}/v8/v8_test_filtered.root"
 TRUTH_ROOT="${DATA}/v8/v8_test_filtered_truth.root"
 
 # Must agree with EVAL_CONFIG's eval_path + datasets[0].name.
-EVAL_DIR="clasdis_v8_1_filtered"
-DATASET_NAME="clasdis_v8_filtered"
+EVAL_DIR="clasdis_filtered"
+DATASET_NAME="clasdis_filtered"
 
 mkdir -p "${REPO_ROOT}/logs/slurm"
 

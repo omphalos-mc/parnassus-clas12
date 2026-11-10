@@ -1,4 +1,4 @@
-name: v8_1_clas12_RGA_event
+name: clas12_RGA_event
 
 trainer:
   num_nodes: 10
@@ -49,8 +49,8 @@ data:
   entry_start_valid: 40_000_000
 
 
-  scale_dict: src/parnassus_core/experiments/clas12_RGA/configs/v8/var_transform_v8.yaml
-  var_dict: src/parnassus_core/experiments/clas12_RGA/configs/v8/event_vars_v8.yaml
+  scale_dict: src/parnassus_core/experiments/clas12_RGA/configs/var_transform.yaml
+  var_dict: src/parnassus_core/experiments/clas12_RGA/configs/event_vars.yaml
 
   class_based_scaling: true
 

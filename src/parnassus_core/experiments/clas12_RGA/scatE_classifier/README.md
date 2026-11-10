@@ -26,10 +26,10 @@ standardization stored inside it), `config.json`, `metrics.json`, `history.csv` 
 loss, ROC and confusion-matrix plots into `--outdir`. The default,
 `trained_models/classifier`, is where `scatE_filter.py` looks for the checkpoint.
 
-## The checkpoint used for the v8.1 results
+## The checkpoint used for the paper results
 
 `trained_models/classifier/best_model.ckpt` is trained on `v8/pre-filter_train_data_v8.root`.
-That v8 sample keeps every event, with and without a reconstructed scattered electron
+That sample keeps every event, with and without a reconstructed scattered electron
 (19.7% have `pflow_scatE == 1`). It overlaps `v8_train.root`, the event and particle models'
 training sample, and shares no events with `v8_test.root`, so the evaluation chain filters
 events the classifier has not seen.
@@ -37,7 +37,7 @@ events the classifier has not seen.
 | Setting | Value |
 |---|---|
 | Input | First 10M of the file's 19.91M events, split 7M / 1.5M / 1.5M (seed 0) |
-| Model | MLP, 4 × 128 hidden units, ReLU, dropout 0.02 (the best trial of the Optuna search in `MLP.ipynb`, run on the v4 sample) |
+| Model | MLP, 4 × 128 hidden units, ReLU, dropout 0.02 (the best trial of the Optuna search in `MLP.ipynb`, run on an earlier CLAS12 sample) |
 | Optimizer | Adam, lr 2.929e-3, batch 8192, 50 epochs (early-stopping patience 10, never reached), best epoch 45 |
 | Test split | Accuracy 0.957, F1 0.896, AUC 0.977 (majority-class baseline 0.803) |
 
@@ -48,6 +48,15 @@ python -m parnassus_core.experiments.clas12_RGA.scatE_classifier.train_scatE \
     --root-file <parnassus_data>/v8/pre-filter_train_data_v8.root --n-events 10000000
 ```
 
+## Diagnostics
+
+[`plotter.ipynb`](plotter.ipynb) runs the checkpoint over the held-out `v8/v8_test.root` and draws
+the truth-kinematics pair plot, the confusion matrix (with Bernoulli sampling, as the fast
+simulation uses the model), the ROC curve, and the efficiency profiles and 2-D closure maps in
+`p`, `theta` and `phi`. The efficiency profiles are saved as `Filter_Efficiency.pdf`. Set
+`PARNASSUS_DATA` to the directory that holds `v8/`, and `PARNASSUS_FIG_DIR` to change where the
+figure is written (default `plots/paper_figs/`).
+
 ## Exploration notebooks
 
 These are informal, kept as a record of the exploration, and only on the `train_clas12`
@@ -55,7 +64,5 @@ development branch:
 
 - `MLP.ipynb`: data exploration, the MLP, and the Optuna hyperparameter search.
 - `BDT.ipynb`: a gradient-boosted-tree comparison.
-- `plotter.ipynb`: feature-space and calibration plots.
 - `classifier_eval.md`: notes on evaluating a checkpoint, with calibration as the main
-  criterion. Written for the earlier v4-trained checkpoint, so its files and reference
-  numbers are v4's.
+  criterion. Written for an earlier checkpoint, so its files and reference numbers differ.

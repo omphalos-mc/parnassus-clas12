@@ -1,16 +1,16 @@
-# Feature scaling for the v8 / v8.1 CLAS12 models (scale_dict of configs/v8/* and
-# evaluation/configs/v8/*).
+# Feature scaling for the CLAS12 models (scale_dict of configs/event.yaml,
+# configs/particle.yaml and evaluation/configs/config.yaml).
 #
-# Provenance: the statistics were computed on the v8 samples with
+# Provenance: the statistics were computed on the training sample with
 # preprocessing/scaling/calculate_transforms_batched.py (--split-class for the
 # per-pdgId blocks below), and the file was then edited by hand:
-#   - entries the v8 models do not use are commented out (pt, prel, ptrel, ht,
-#     met_x, met_y; v8 trains on p and the p-based event sums),
-#   - the pdgId_45 (deuteron) block is dropped, since v8 has no deuterons,
+#   - entries the models do not use are commented out (pt, prel, ptrel, ht,
+#     met_x, met_y; the models train on p and the p-based event sums),
+#   - the pdgId_45 (deuteron) block is dropped, since the samples have no deuterons,
 #   - the explanatory comments were added.
 # The exact scaling command and config of that run were not recorded. The values
 # below are the ones the paper models were trained and evaluated with; changing
-# them invalidates the v8.1 checkpoints.
+# them invalidates the released checkpoints.
 #
 # pt:
 #   mean: 0.4438
@@ -137,8 +137,8 @@ beta: &beta
 # Per-pdgId particle transforms (data.class_based_scaling). Each particle uses the
 # block of its pdgId bucketed like the pdgId one-hot (utils/pid.py
 # pid_onehot_ids); species without a bucket use pdgId_0 (truth K0L, anti-neutrons
-# and mu+-: 0.9% of truth particles, none in pflow). v8 has no deuterons,
-# so there is no pdgId_45 block. In this mode a per-particle variable missing
+# and mu+-: 0.9% of truth particles, none in pflow). The samples have no
+# deuterons, so there is no pdgId_45 block. In this mode a per-particle variable missing
 # from the particle's block is passed through unscaled, so every block lists
 # every scaled per-particle variable.
 # p and theta: per-pdgId stats, truth and pflow combined. beta, vx, vy and vz

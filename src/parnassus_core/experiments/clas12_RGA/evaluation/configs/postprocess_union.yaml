@@ -1,4 +1,4 @@
-# Post-processing config for the v8 / v8.1 full-chain evaluation, union join.
+# Post-processing config for the full-chain evaluation, union join.
 # Consumed by: python -m parnassus_core.evaluation.postprocess_eval -c <this file>
 #
 # Joins the eval output (-i, fast sim) to the scatE_filter truth-mode reference
@@ -8,10 +8,10 @@
 # rows the eval run does not cover (false negatives, or events dropped by the
 # max_particles veto) get an empty fastsim collection. An empty collection means
 # "this event is not in my reconstructed-electron set", which is the comparison
-# being made. For the v8.1 paper run (all 29.91M events of v8_test.root):
+# being made. For the paper run (all 29.91M events of v8_test.root):
 #
-#   -i clasdis_v8_1_filtered/clasdis_v8_filtered_eval_5862kv8_filter_29M_test.root  (5,862,629 events)
-#   -d <parnassus_data>/v8/v8_test_filtered_truth.root                               (5,900,918 events)
+#   -i <eval output>                                     (5,862,629 events)
+#   -d <parnassus_data>/v8/v8_test_filtered_truth.root   (5,900,918 events)
 #   -> union 6,909,889 rows; -n 6000000 keeps the first 6,000,000 by eventNumber
 #      (eventNumber < 25,971,175) = 4,214,491 in both
 #                                 +   875,932 fastsim-only
@@ -49,7 +49,7 @@ join: union
 
 
 # python -m parnassus_core.evaluation.postprocess_eval \
-#   -i clasdis_v8_1_filtered/clasdis_v8_filtered_eval_5862kv8_filter_29M_test.root \
+#   -i clasdis_filtered/clasdis_filtered_eval_5862k_paper.root \
 #   -d <parnassus_data>/v8/v8_test_filtered_truth.root \
-#   -o clasdis_v8_1_filtered/postprocess_dr_0_3_v8_filter_29M.root -n 6000000 \
-#   -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/v8/postprocess_union.yaml
+#   -o clasdis_filtered/postprocess_paper.root -n 6000000 \
+#   -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/postprocess_union.yaml

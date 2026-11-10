@@ -28,7 +28,7 @@ DEFAULT_EVENT_BINS = {
     "ht": defaultdict(constant_factory(np.linspace(0, 6, 100))),
     "met_x": defaultdict(constant_factory(np.linspace(-5, 5, 50))),
     "met_y": defaultdict(constant_factory(np.linspace(-5, 5, 50))),
-    # p analogues (v8+ event model targets)
+    # p analogues (event model targets)
     "ht_p": defaultdict(constant_factory(np.linspace(0, 25, 100))),
     "Pxh": defaultdict(constant_factory(np.linspace(-4, 4, 100))),
     "Pyh": defaultdict(constant_factory(np.linspace(-4, 4, 100))),

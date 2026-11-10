@@ -1,7 +1,7 @@
 #!/bin/bash
 # Evaluate several particle-model checkpoints in parallel inside an interactive allocation,
 # then postprocess each prediction file against the test data with
-# evaluation/configs/v8/postprocess_df.yaml.
+# evaluation/configs/postprocess_df.yaml.
 #
 # Each checkpoint is tested once per solver, given as -s <sampler>:<n_steps> (sampler is one
 # of euler, sde, pndm, dpm; default dpm:40). Each (checkpoint, solver) test runs as its own
@@ -24,9 +24,9 @@
 # Allocate 1-4 nodes (4 GPUs each), then run:
 #   salloc -A <account> -C gpu -q interactive -N 2 -t 04:00:00 \
 #       --ntasks-per-node=4 --gpus-per-task=1 --cpus-per-task=32
-#   bash src/parnassus_core/experiments/clas12_RGA/scripts/submit_test_particle_v8_parallel.sh [-s dpm:60 -s euler:100 ...] \
+#   bash src/parnassus_core/experiments/clas12_RGA/scripts/submit_test_particle_parallel.sh [-s dpm:60 -s euler:100 ...] \
 #       <run_dir>/ckpts/<a>.ckpt <run_dir>/ckpts/<b>.ckpt ...
-#   bash src/parnassus_core/experiments/clas12_RGA/scripts/submit_test_particle_v8_parallel.sh [-s dpm:60 ...] -d <run_dir> -e 3,51,90 [-w EMA]
+#   bash src/parnassus_core/experiments/clas12_RGA/scripts/submit_test_particle_parallel.sh [-s dpm:60 ...] -d <run_dir> -e 3,51,90 [-w EMA]
 #
 # Both steps of a test log to logs/slurm/<output_name>_<jobid>.log. A failed test
 # skips its postprocess step. Failed evaluations do not stop the others; a summary is
@@ -44,7 +44,7 @@ N_TEST=500000
 DEFAULT_SOLVER=dpm:40
 # Relative to the repo root. The _dr_0_3 in the postprocess output
 # name is this config's dr_cut.
-POSTPROCESS_CONFIG=src/parnassus_core/experiments/clas12_RGA/evaluation/configs/v8/postprocess_df.yaml
+POSTPROCESS_CONFIG=src/parnassus_core/experiments/clas12_RGA/evaluation/configs/postprocess_df.yaml
 
 usage() {
     echo "Usage: $(basename "$0") [-s <sampler>:<n_steps>]..." \
@@ -173,7 +173,7 @@ parse_checkpoint() {
         exit 1
     fi
     # Run tag is the run dir name minus its trailing _<YYYYMMDD>-T<HHMMSS> timestamp:
-    # v6_6_clas12_RGA_particle_20261012-T150456 -> v6_6_clas12_RGA_particle.
+    # clas12_RGA_particle_20261029-T214538 -> clas12_RGA_particle.
     if [[ ${run_name} =~ ^(.+)_[0-9]{8}-T[0-9]{6}$ ]]; then
         run_tag=${BASH_REMATCH[1]}
     else

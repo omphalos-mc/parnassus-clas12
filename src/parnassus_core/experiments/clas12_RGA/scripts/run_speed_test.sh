@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --constraint=gpu
 #SBATCH --qos=shared
-#SBATCH --job-name=clasdis_v8_1_speed_test
+#SBATCH --job-name=clasdis_speed_test
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
@@ -10,16 +10,16 @@
 #SBATCH --output=logs/slurm/%x_%j.out
 #SBATCH --error=logs/slurm/%x_%j.err
 
-# Time every stage of the CLAS12 v8.1 inference chain on 500k generated events:
+# Time every stage of the CLAS12 inference chain on 500k generated events:
 # scatE pre-filter, dataset load, batch assembly, event network, particle
 # network, unscaling, and output writing. The report is printed and saved to
-# clasdis_v8_1_filtered/logs/speed_test_<timestamp>.{log,json}.
+# clasdis_filtered/logs/speed_test_<timestamp>.{log,json}.
 #
 # On an interactive GPU node:
 #   salloc -A <account> -C gpu -q shared_interactive -G 1 -c 32 -t 03:00:00
-#   bash src/parnassus_core/experiments/clas12_RGA/scripts/run_speed_test_v8_1.sh [speed_test options]
+#   bash src/parnassus_core/experiments/clas12_RGA/scripts/run_speed_test.sh [speed_test options]
 #
-# Or as a batch job: sbatch src/parnassus_core/experiments/clas12_RGA/scripts/run_speed_test_v8_1.sh [speed_test options]
+# Or as a batch job: sbatch src/parnassus_core/experiments/clas12_RGA/scripts/run_speed_test.sh [speed_test options]
 #
 # Extra arguments are forwarded to speed_test.py (and override the defaults
 # below), e.g.
@@ -46,7 +46,7 @@ cd "${REPO_ROOT}"
 mkdir -p "${REPO_ROOT}/logs/slurm"
 
 python -m parnassus_core.experiments.clas12_RGA.evaluation.speed_test \
-    -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/v8/config_v8_1.yaml \
+    -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/config.yaml \
     --filter-input "${DATA}/v8/v8_test.root" \
     --num-workers 8 \
     "$@"
