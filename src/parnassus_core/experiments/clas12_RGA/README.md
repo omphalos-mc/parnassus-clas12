@@ -40,8 +40,8 @@ clas12_RGA/
 ## Data
 
 The `evt_tree` ROOT files are produced from CLAS12 HIPO files by the separate
-[`parnassus_data_prep`](https://github.com/tjayhllstrn/parnassus_data_prep) pipeline. The
-samples are:
+[`parnassus_data_prep`](https://github.com/tjayhllstrn/parnassus_data_prep) pipeline (tag
+`paper-v1`), which also lists the cuts. The samples are:
 
 | File | Content |
 |---|---|
