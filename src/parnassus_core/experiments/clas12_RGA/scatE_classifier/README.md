@@ -23,12 +23,14 @@ python -m parnassus_core.experiments.clas12_RGA.scatE_classifier.train_scatE \
 The input is any `evt_tree` file that keeps the events without a reconstructed electron
 (`pflow_scatE` is both 0 and 1). The run writes `best_model.ckpt` (with the feature
 standardization stored inside it), `config.json`, `metrics.json`, `history.csv` and the
-loss, ROC and confusion-matrix plots into `--outdir`. The default,
-`trained_models/classifier`, is where `scatE_filter.py` looks for the checkpoint.
+loss, ROC and confusion-matrix plots into `--outdir` (default `trained_models/classifier`).
+`scatE_filter.py` reads the paper checkpoint by default; pass
+`--ckpt trained_models/classifier/best_model.ckpt` to use a new run instead.
 
 ## The checkpoint used for the paper results
 
-`trained_models/classifier/best_model.ckpt` is trained on `v8/pre-filter_train_data_v8.root`.
+[`pre-trained-models/pre-filter_model.ckpt`](../pre-trained-models/README.md) is trained on
+`v8/pre-filter_train_data_v8.root`.
 That sample keeps every event, with and without a reconstructed scattered electron
 (19.7% have `pflow_scatE == 1`). It overlaps `v8_train.root`, the event and particle models'
 training sample, and shares no events with `v8_test.root`, so the evaluation chain filters

@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional
 import lightning.pytorch as pl
 import torch
 from lightning.pytorch import Callback
+from lightning.pytorch.trainer.states import TrainerFn
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
 
@@ -150,6 +151,12 @@ class EMA(Callback):
         pl_module: "pl.LightningModule",
         checkpoint: Dict[str, Any],
     ) -> None:
+        # The EMA state is only needed to resume training: the EMA optimizer is built in
+        # on_fit_start, so test/validate/predict never use it, and weights-only
+        # checkpoints (such as the CLAS12 pre-trained models) carry none.
+        if trainer.state.fn != TrainerFn.FITTING:
+            return
+
         checkpoint_callback = trainer.checkpoint_callback
 
         ckpt_path = trainer.ckpt_path

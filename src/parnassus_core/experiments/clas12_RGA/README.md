@@ -31,6 +31,7 @@ clas12_RGA/
 ├── modules.py              # SANamedNetwork (self-attention block used by the event model)
 ├── configs/                # Config Files for training
 ├── scatE_classifier/       # scatE classifier training (train_scatE.py) and plots (plotter.ipynb)
+├── pre-trained-models/     # the paper checkpoints: event, particle and scatE models
 ├── evaluation/             # scatE_filter.py, speed_test.py, configs/ (eval + postprocess)
 ├── performance/            # CLAS12 plotting on top of parnassus_core.performance
 ├── scripts/                # SLURM jobs behind the paper results (see scripts/README.md)
@@ -51,8 +52,9 @@ The `evt_tree` ROOT files are produced from CLAS12 HIPO files by the separate
 | `v8/v8_test_filtered.root` | `scatE_filter --mode sample` output: the fast-sim input |
 | `v8/v8_test_filtered_truth.root` | `scatE_filter --mode truth` output: the full-sim reference |
 
-The trained checkpoints and the postprocessed evaluation output used for the figures are in the
-data release (DOI: TODO). Real CLAS12 RGA data are not distributed.
+The trained checkpoints are in [`pre-trained-models/`](pre-trained-models/README.md). The
+postprocessed evaluation output used for the figures is in the data release (DOI: TODO).
+Real CLAS12 RGA data are not distributed.
 
 ## Training
 
@@ -107,8 +109,9 @@ python -m parnassus_core.evaluation.postprocess_eval \
     -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/postprocess_union.yaml
 ```
 
-`evaluation/configs/config.yaml` holds the checkpoint paths, the samplers (PNDM with 25 steps for the event
-model, DPM with 40 for the particle model) and `data.top_folder`; edit those for your copy.
+`evaluation/configs/config.yaml` holds the checkpoint paths (the files in `pre-trained-models/`),
+the samplers (PNDM with 25 steps for the event model, DPM with 40 for the particle model) and
+`data.top_folder`; edit `data.top_folder` for your copy of the data.
 
 **Why two filter passes.** The classifier's keep decision is stochastic and independent of what
 reconstruction did, so some kept events have no reconstructed scattered electron, and their

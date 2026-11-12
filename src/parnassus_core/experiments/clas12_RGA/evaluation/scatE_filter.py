@@ -61,7 +61,9 @@ ELECTRON_PDGID = 11
 # Feature order is fixed by the checkpoint's ``input_fields``; never reorder.
 INPUT_FIELDS = ("p", "theta", "phi")
 
-DEFAULT_CKPT = "trained_models/classifier/best_model.ckpt"
+DEFAULT_CKPT = (
+    "src/parnassus_core/experiments/clas12_RGA/pre-trained-models/pre-filter_model.ckpt"
+)
 
 # Branches needed to build the classifier features and the truth-mode mask.
 FEATURE_BRANCHES = ["truth_pt", "truth_theta", "truth_phi", "truth_pdgId"]

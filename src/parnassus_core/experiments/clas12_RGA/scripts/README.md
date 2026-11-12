@@ -28,10 +28,10 @@ sbatch -A <account> src/parnassus_core/experiments/clas12_RGA/scripts/<script>.s
   `COMET_WORKSPACE` from the environment. They take `train_path`/`valid_path` from
   `$DATA`. Pass `--dry_run` to run one training step on the current node (no allocation
   needed).
-- The evaluation scripts read the scatE classifier from
-  `trained_models/classifier/best_model.ckpt` and the model checkpoints from
-  `evaluation/configs/config.yaml`. Edit `ckpt_path` and `data.top_folder` in
-  that config for your copy of the checkpoints and data.
+- The evaluation scripts read the three paper checkpoints from
+  [`pre-trained-models/`](../pre-trained-models/README.md): the classifier through `scatE_filter.py`'s default `--ckpt`, the event and particle models
+  through `ckpt_path` in `evaluation/configs/config.yaml`. Edit `data.top_folder` in that
+  config for your copy of the data.
 - `run_evaluation_chain.sh` writes the filtered samples into `$DATA/v8/` and skips
   that step when they already exist (`--refilter` rebuilds them).
 - The two `submit_test_*_parallel.sh` scripts are run with `bash` inside an interactive

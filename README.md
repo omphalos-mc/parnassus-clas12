@@ -35,8 +35,10 @@ particles, computes the DIS kinematics and joins the fast-sim output with the fu
 - **Data preparation** (CLAS12 HIPO files to the ROOT trees used here) is in
   [parnassus_data_prep](https://github.com/tjayhllstrn/parnassus_data_prep); the tag
   `paper-v1` goes with the paper.
-- **Trained checkpoints and the postprocessed MC evaluation output** are on Zenodo
-  (DOI: TODO). Real CLAS12 RG-A data are not distributed.
+- **Trained checkpoints** of the paper models are in
+  [`clas12_RGA/pre-trained-models/`](src/parnassus_core/experiments/clas12_RGA/pre-trained-models/README.md).
+- **The postprocessed MC evaluation output** is on Zenodo (DOI: TODO). Real CLAS12 RG-A data
+  are not distributed.
 
 ## Installation
 

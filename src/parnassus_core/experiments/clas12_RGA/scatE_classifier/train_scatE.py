@@ -6,10 +6,10 @@ Ported from the MLP section of MLP.ipynb. From the repository root:
         --root-file <parnassus_data>/v8/pre-filter_train_data_v8.root --n-events 10000000
 
 The run writes the min-validation-loss checkpoint (``best_model.ckpt``), the diagnostic
-plots (loss curves, confusion matrix, ROC) and the metrics into ``--outdir``. The default
-``trained_models/classifier`` is where ``evaluation/scatE_filter.py`` looks for the
-checkpoint. Model and optimizer settings are in CONFIG; the data and run options can be
-overridden on the command line (``--help``).
+plots (loss curves, confusion matrix, ROC) and the metrics into ``--outdir`` (default
+``trained_models/classifier``). ``evaluation/scatE_filter.py`` reads the paper checkpoint
+from ``pre-trained-models/`` unless it is given ``--ckpt``. Model and optimizer settings are
+in CONFIG; the data and run options can be overridden on the command line (``--help``).
 """
 
 import argparse

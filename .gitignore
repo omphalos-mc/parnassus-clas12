@@ -138,6 +138,8 @@ evals
 # PyTorch checkpoints
 *.ckpt
 *.pt
+# ...except the weights-only paper checkpoints, which ship with the repository
+!src/parnassus_core/experiments/clas12_RGA/pre-trained-models/*.ckpt
 
 # NFS
 *.nfs*
