@@ -196,8 +196,8 @@ class VarConfig:
             cfg = yaml.safe_load(f)
         if cfg.get("predict_diff"):
             raise ValueError(
-                f"{var_dict} sets predict_diff, which has been removed. "
-                "Use the pre-cleanup tag to run configs that train on residuals."
+                f"{var_dict} sets predict_diff (training on residuals), "
+                "which is not supported in this release."
             )
 
         if "vars_to_load" in cfg:

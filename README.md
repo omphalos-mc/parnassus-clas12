@@ -27,11 +27,8 @@ particles, computes the DIS kinematics and joins the fast-sim output with the fu
 
 ## What is in this repository
 
-- **`main`** (this branch) is the release: the library, the CLAS12 configs, the scatE
-  classifier, the job scripts, and the notebooks behind the paper figures.
-- **`train_clas12`** is the informal development branch, with the analysis tools in `tools/`,
-  the configs of the earlier models, and the full history. The `pre-cleanup` tag can rerun
-  those models.
+- **This repository** is the release: the library, the CLAS12 configs, the scatE classifier,
+  the job scripts, and the notebooks behind the paper figures.
 - **Data preparation** (CLAS12 HIPO files to the ROOT trees used here) is in
   [parnassus_data_prep](https://github.com/tjayhllstrn/parnassus_data_prep); the tag
   `paper-v1` goes with the paper.
@@ -45,8 +42,8 @@ particles, computes the DIS kinematics and joins the fast-sim output with the fu
 Python 3.11 or newer:
 
 ```bash
-git clone --single-branch -b main https://github.com/tjayhllstrn/parnassus-core-clas12-configs.git
-cd parnassus-core-clas12-configs
+git clone https://github.com/omphalos-mc/parnassus-clas12.git
+cd parnassus-clas12
 pip install -e . "jsonargparse[signatures]>=4.27.7"
 ```
 

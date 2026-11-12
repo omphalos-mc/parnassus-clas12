@@ -58,13 +58,3 @@ simulation uses the model), the ROC curve, and the efficiency profiles and 2-D c
 `p`, `theta` and `phi`. The efficiency profiles are saved as `Filter_Efficiency.pdf`. Set
 `PARNASSUS_DATA` to the directory that holds `v8/`, and `PARNASSUS_FIG_DIR` to change where the
 figure is written (default `plots/paper_figs/`).
-
-## Exploration notebooks
-
-These are informal, kept as a record of the exploration, and only on the `train_clas12`
-development branch:
-
-- `MLP.ipynb`: data exploration, the MLP, and the Optuna hyperparameter search.
-- `BDT.ipynb`: a gradient-boosted-tree comparison.
-- `classifier_eval.md`: notes on evaluating a checkpoint, with calibration as the main
-  criterion. Written for an earlier checkpoint, so its files and reference numbers differ.

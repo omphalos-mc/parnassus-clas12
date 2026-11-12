@@ -148,9 +148,3 @@ the paper run's postprocessed output from `EVAL_DIR`, under the name it has in t
 set `PARNASSUS_EVAL_DIR` to use the data release instead. Figures are written to `plots/paper_figs/` (`PARNASSUS_FIG_DIR`). The data comparison in
 `dihadron_plots` needs processed RGA data, which are not distributed: set `RGA_DATA_FILE` in the
 notebook to run those cells.
-
-## Development history
-
-The informal development branch `train_clas12` adds the analysis tools in `tools/` and the
-configs of the earlier models. The `pre-cleanup` tag keeps the code needed to rerun those
-models, the oracle scans and the ablation studies.

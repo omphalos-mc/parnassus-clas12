@@ -118,8 +118,8 @@ class EvaluationVarConfig:
             cfg = yaml.safe_load(f)
         if cfg.get("predict_diff"):
             raise ValueError(
-                f"{var_dict} sets predict_diff, which has been removed. "
-                "Use the pre-cleanup tag to evaluate models trained on residuals."
+                f"{var_dict} sets predict_diff (training on residuals), "
+                "which is not supported in this release."
             )
 
         return EvaluationVarConfig(

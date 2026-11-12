@@ -10,7 +10,7 @@ authors:
   - family-names: Kobylianskii
     given-names: Dmitrii
 license: MIT
-repository-code: "https://github.com/tjayhllstrn/parnassus-core-clas12-configs"
+repository-code: "https://github.com/omphalos-mc/parnassus-clas12"
 version: "paper-v1"
 preferred-citation:
   type: article
