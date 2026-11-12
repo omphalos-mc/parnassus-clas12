@@ -23,7 +23,7 @@ data:
   # (configs/event.yaml, configs/particle.yaml) override train_path and valid_path.
   train_path: "/global/cfs/cdirs/m3246/tjhellst/parnassus_data/v8/v8_train.root"
   valid_path: "/global/cfs/cdirs/m3246/tjhellst/parnassus_data/v8/v8_train.root"
-  test_path: "/global/cfs/cdirs/m3246/tjhellst/parnassus_data/v8/v8_test.root"
+  test_path: "/global/cfs/cdirs/m3246/tjhellst/parnassus_data/v8/v8_test_filtered_truth.root"
 
 # Training stuff here
 trainer:
