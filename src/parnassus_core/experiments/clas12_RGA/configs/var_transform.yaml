@@ -4,29 +4,19 @@
 # Provenance: the statistics were computed on the training sample with
 # preprocessing/scaling/calculate_transforms_batched.py (--split-class for the
 # per-pdgId blocks below), and the file was then edited by hand:
-#   - entries the models do not use are commented out (pt, prel, ptrel, ht,
-#     met_x, met_y; the models train on p and the p-based event sums),
+#   - entries the models do not use are removed (the pt-based variables pt, prel,
+#     ptrel, ht, met_x and met_y; the models train on p and the p-based event sums),
 #   - the pdgId_45 (deuteron) block is dropped, since the samples have no deuterons,
 #   - the explanatory comments were added.
 # The exact scaling command and config of that run were not recorded. The values
 # below are the ones the paper models were trained and evaluated with; changing
 # them invalidates the released checkpoints.
 #
-# pt:
-#   mean: 0.4438
-#   std: 0.3704
-#   min: 0.0
-#   max: 5.9535
 p:
   mean: 1.6462
   std: 1.6668
   min: 0.0
   max: 11.4368
-# prel:
-#   mean: 0.1615
-#   std: 0.1725
-#   min: 0.0
-#   max: 1.0
 ht_p:
   mean: 10.1939
   std: 2.8173
@@ -42,11 +32,6 @@ phi:
   std: 1.8171
   min: -3.1416
   max: 3.1416
-# ptrel:
-#   mean: 0.1615
-#   std: 0.1488
-#   min: 0.0
-#   max: 1.0
 # Vertex: pflow charged particles only (pdgid_class_dict class < 3). asinh with
 # fn_shift = -median and fn_scale = IQR; mean/std are of the transformed values.
 vx: &vx
@@ -73,11 +58,6 @@ vz: &vz
   fn: asinh
   fn_scale: 2.8573
   fn_shift: 2.971
-# ht:
-#   mean: 2.7482
-#   std: 0.9119
-#   min: 0.1313
-#   max: 18.9869
 Q2:
   mean: 0.9182
   std: 0.3806
@@ -94,16 +74,6 @@ npart:
   std: 2.6939
   min: 1.0
   max: 44.0
-# met_x:
-#   mean: 0.0026
-#   std: 0.5746
-#   min: -12.9161
-#   max: 12.4559
-# met_y:
-#   mean: -0.0057
-#   std: 0.5813
-#   min: -12.8373
-#   max: 11.7632
 Pxh:
   mean: -0.0103
   std: 0.85

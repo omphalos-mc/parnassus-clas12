@@ -7,9 +7,10 @@ Ported from the MLP section of MLP.ipynb. From the repository root:
 
 The run writes the min-validation-loss checkpoint (``best_model.ckpt``), the diagnostic
 plots (loss curves, confusion matrix, ROC) and the metrics into ``--outdir`` (default
-``trained_models/classifier``). ``evaluation/scatE_filter.py`` reads the paper checkpoint
-from ``pre-trained-models/`` unless it is given ``--ckpt``. Model and optimizer settings are
-in CONFIG; the data and run options can be overridden on the command line (``--help``).
+``trained_models/classifier``). The evaluation chain reads the checkpoint named by the
+``scatE_filter.ckpt_path`` key of its config (the paper checkpoint in
+``pre-trained-models/``). Model and optimizer settings are in CONFIG; the data and run
+options can be overridden on the command line (``--help``).
 """
 
 import argparse
@@ -63,7 +64,7 @@ CONFIG = {
 }
 
 # structural, not hyperparameters
-PARTICLE_FIELDS = ["pt", "theta", "phi", "pdgId"]
+PARTICLE_FIELDS = ["p", "theta", "phi", "pdgId"]
 INPUT_FIELDS = ["p", "theta", "phi"]
 
 
@@ -100,7 +101,7 @@ def load_events(cfg, log=print):
     truth_particles = evt_tree.arrays(
         PARTICLE_FIELDS,
         aliases={
-            "pt": "truth_pt",
+            "p": "truth_p",
             "theta": "truth_theta",
             "phi": "truth_phi",
             "pdgId": "truth_pdgId",
@@ -123,11 +124,8 @@ def load_events(cfg, log=print):
     truth_electrons = truth_electrons[has_electron]
     pflow_labels = labels[has_electron].to_numpy()
 
-    truth_electrons = truth_electrons[:, 0]
-
-    # p from pt and theta, then keep only the model inputs
-    truth_electrons["p"] = truth_electrons["pt"] / np.sin(truth_electrons["theta"])
-    truth_electrons = truth_electrons[INPUT_FIELDS]
+    # keep only the model inputs of the scattered electron
+    truth_electrons = truth_electrons[:, 0][INPUT_FIELDS]
 
     log(f"labels: shape {pflow_labels.shape} dtype {pflow_labels.dtype}")
     log(f"data: truth_electrons: {truth_electrons.type}")
@@ -145,7 +143,7 @@ def prepare_tensors(pflow_labels, truth_electrons, cfg, device, log=print):
     # labels: (N,) = 0/1 whether the scattered electron was reconstructed
     y = pflow_labels["scatE"].astype(np.float32)
 
-    # drop any event with a non-finite feature (p = pt/sin(theta) can blow up)
+    # drop any event with a non-finite feature
     good = np.isfinite(X).all(axis=1)
     X, y = X[good], y[good]
     log(f"dropped {int(np.sum(~good))} events with non-finite features")

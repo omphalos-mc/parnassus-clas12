@@ -9,10 +9,11 @@ paper results use the models described here.
 ## Generation chain
 
 1. **scatE pre-filter** ([`scatE_classifier/`](scatE_classifier/README.md),
-   [`evaluation/scatE_filter.py`](evaluation/scatE_filter.py)). A small MLP maps the truth
-   `(p, theta, phi)` of the scattered electron to the probability that reconstruction finds it,
-   and each event is kept by a Bernoulli draw on that probability. The next two stages are
-   trained only on events with a reconstructed scattered electron.
+   [`parnassus_core/evaluation/event_filter.py`](../../evaluation/event_filter.py)). A small MLP
+   maps the truth `(p, theta, phi)` of the scattered electron to the probability that
+   reconstruction finds it, and each event is kept by a Bernoulli draw on that probability. The
+   `scatE_filter` block of the eval config applies it while the input is read. The next two
+   stages are trained only on events with a reconstructed scattered electron.
 2. **Event model** (`configs/event.yaml`). Generates the reconstructed multiplicity
    `npflow`, the scalar momentum sum `ht_p`, the hadronic momentum sums `Pxh` and `Pyh`, and the
    photon and neutron counts `Ng` and `Nn`, conditioned on the truth particles.
@@ -32,7 +33,7 @@ clas12_RGA/
 ├── configs/                # Config Files for training
 ├── scatE_classifier/       # scatE classifier training (train_scatE.py) and plots (plotter.ipynb)
 ├── pre-trained-models/     # the paper checkpoints: event, particle and scatE models
-├── evaluation/             # scatE_filter.py, speed_test.py, configs/ (eval + postprocess)
+├── evaluation/             # scatE_filter.py (full-sim reference), speed_test.py, configs/
 ├── performance/            # CLAS12 plotting on top of parnassus_core.performance
 ├── scripts/                # SLURM jobs behind the paper results (see scripts/README.md)
 └── notebooks/              # performance_test.ipynb and dihadron_plots.ipynb (paper figures)
@@ -49,8 +50,8 @@ The `evt_tree` ROOT files are produced from CLAS12 HIPO files by the separate
 | `v8/v8_train.root` | Training sample, 59.0M events, all with a reconstructed scattered electron |
 | `v8/v8_test.root` | Test sample, 29.91M events, including those without (about 20% have one) |
 | `v8/pre-filter_train_data_v8.root` | scatE classifier training sample, 19.91M events with and without a reconstructed scattered electron; overlaps `v8_train.root`, no events in common with `v8_test.root` |
-| `v8/v8_test_filtered.root` | `scatE_filter --mode sample` output: the fast-sim input |
-| `v8/v8_test_filtered_truth.root` | `scatE_filter --mode truth` output: the full-sim reference |
+| `v8/v8_test_filtered.root` | Classifier-sampled `v8_test.root`: the fast-sim input of the paper run, written by the earlier standalone filter (the chain now samples inside `eval.py`) |
+| `v8/v8_test_filtered_truth.root` | `scatE_filter.py` output, the `pflow_scatE == 1` events: the full-sim reference |
 
 The trained checkpoints are in [`pre-trained-models/`](pre-trained-models/README.md). The
 postprocessed evaluation output used for the figures is in the data release (DOI: TODO).
@@ -75,32 +76,29 @@ for a one-step check. The paper models were trained with the multi-node jobs in
 
 ## Evaluation
 
-`scripts/run_evaluation_chain.sh` runs the four steps below. The paper run filtered all
-29.91M events of `v8_test.root` and evaluated every kept event (`--n-keep` is only a stopping
-target, so the file size keeps everything), then ran step 4 by hand on the first 6M joined events:
+`scripts/run_evaluation_chain.sh` runs the three steps below. The paper run evaluated every
+classifier-kept event of all 29.91M events of `v8_test.root` (`--n-events` is only a stopping
+target, so the file size keeps everything), then ran step 3 by hand on the first 6M joined events:
 
 ```bash
 sbatch -A <account> src/parnassus_core/experiments/clas12_RGA/scripts/run_evaluation_chain.sh \
-    --refilter --n-read 29910000 --n-keep 29910000 --suffix _paper --skip-postprocess
+    --refilter --n-read 29910000 --n-events 29910000 --suffix _paper --skip-postprocess
 ```
 
 By hand, with `DATA` pointing at the directory that holds `v8/`:
 
 ```bash
-# 1. fast-sim input: keep each event ~ Bernoulli(classifier probability)
+# 1. full-sim reference: keep the events whose scattered electron was reconstructed
 python -m parnassus_core.experiments.clas12_RGA.evaluation.scatE_filter \
-    -i $DATA/v8/v8_test.root -o $DATA/v8/v8_test_filtered.root --mode sample --seed 0
+    -i $DATA/v8/v8_test.root -o $DATA/v8/v8_test_filtered_truth.root
 
-# 2. full-sim reference: keep the events whose scattered electron was reconstructed
-python -m parnassus_core.experiments.clas12_RGA.evaluation.scatE_filter \
-    -i $DATA/v8/v8_test.root -o $DATA/v8/v8_test_filtered_truth.root --mode truth
-
-# 3. full-chain generation (event model -> particle model)
+# 2. full-chain generation (event model -> particle model); the scatE_filter block of the
+#    config keeps each event of v8_test.root ~ Bernoulli(classifier probability)
 python -m parnassus_core.evaluation.eval \
     -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/config.yaml \
-    -bs 4096 -ne -1 --num_workers 8 --suffix _paper
+    -bs 4096 -ne 29910000 --num_workers 8 --suffix _paper
 
-# 4. cuts, matching, DIS kinematics, four-vectors; union join with the reference.
+# 3. cuts, matching, DIS kinematics, four-vectors; union join with the reference.
 #    -n 6000000 keeps the first 6M joined events by eventNumber; -n -1 keeps all of them.
 python -m parnassus_core.evaluation.postprocess_eval \
     -i clasdis_filtered/clasdis_filtered_eval_5862k_paper.root \
@@ -110,13 +108,18 @@ python -m parnassus_core.evaluation.postprocess_eval \
 ```
 
 `evaluation/configs/config.yaml` holds the checkpoint paths (the files in `pre-trained-models/`),
-the samplers (PNDM with 25 steps for the event model, DPM with 40 for the particle model) and
-`data.top_folder`; edit `data.top_folder` for your copy of the data.
+the samplers (PNDM with 25 steps for the event model, DPM with 40 for the particle model), the
+`scatE_filter` block (classifier checkpoint, mode, seed) and `data.top_folder`; edit
+`data.top_folder` for your copy of the data. With the filter on, `n_events` (and `-ne`) counts
+kept events: the classifier pass stops reading the input once that many are kept. The paper's
+fast-sim input, `v8_test_filtered.root`, was sampled by an earlier standalone version of the same
+filter; a rerun selects a statistically equivalent, not identical, event set.
 
-**Why two filter passes.** The classifier's keep decision is stochastic and independent of what
-reconstruction did, so some kept events have no reconstructed scattered electron, and their
+**Why a separate reference.** The classifier's keep decision is stochastic and independent of
+what reconstruction did, so some kept events have no reconstructed scattered electron, and their
 `pflow` branches are not a valid reference. `postprocess_eval` therefore joins the generated
-events (`-i`) to the truth-mode file (`-d`) by `eventNumber`. With the union join
+events (`-i`) to the `pflow_scatE == 1` file (`-d`) by `eventNumber`; its read window (`-ne`)
+must cover every event the eval run's classifier pass read. With the union join
 (`postprocess_union.yaml`), an empty `fastsim` or `pflow` collection marks an event that is not
 in that sample, so efficiencies and distributions can both be compared. In the paper run, the
 5,862,629 generated and 5,900,918 reference events join to 6,909,889 rows. The postprocessed file
@@ -124,9 +127,17 @@ keeps the first 6,000,000 of them (`eventNumber` below 25,971,175): 4,214,491 ar
 samples, 875,932 only in the fast sim, 909,576 only in the full sim, and 1 has no particle
 passing the cuts.
 
-Use `--mode threshold` only for comparisons: at the 0.5 operating point it over-counts
-reconstructed electrons, while Bernoulli sampling reproduces the true rate. Every filter run prints
-a closure report (kept fraction, mean probability, true rate, ROC-AUC).
+Use `mode: threshold` only for comparisons: at the 0.5 operating point it over-counts
+reconstructed electrons, while Bernoulli sampling reproduces the true rate. Every filtered eval
+run prints a closure report (kept fraction, mean probability, true rate, ROC-AUC) when the input
+carries the `pflow_scatE` label.
+
+**Generator (LUND) input.** `eval.py` also reads the LUND text files event generators write
+(`.dat`/`.lund`; a file, a directory of them, or a glob), picked by the path in the config.
+The truth particles are built as in `parnassus_data_prep`: final-state particles (`type == 1`)
+other than electron neutrinos, with theta of at least 1 degree, and `eventNumber` counts the
+events of the input from 0. `evaluation/configs/config_lund.yaml` is the template. Generator
+output has no full-simulation counterpart, so there is no reference to postprocess against.
 
 `evaluation/speed_test.py` (`scripts/run_speed_test.sh`) times every stage of the chain.
 

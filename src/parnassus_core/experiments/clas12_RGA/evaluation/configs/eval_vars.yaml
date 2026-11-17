@@ -8,16 +8,16 @@
 #
 # Only the truth collection is loaded here: in eval mode
 # PhysicsDatasetBase._apply_eval_filter keeps only the collections referenced by
-# ctxt_vars, so every pflow variable comes from the models, not from data.
+# ctxt_vars, so every pflow variable comes from the models, not from data. These
+# truth branches are exactly what a LUND input provides.
 event_vars: ["eventNumber"]
 vars_to_load:
   truth:
     - p
-    - pt
     - theta
     - phi
     - beta
-    - vx #loaded just so I don't have the change the pv shifting code to only look at vz
+    - vx
     - vy
     - vz
     - pdgId

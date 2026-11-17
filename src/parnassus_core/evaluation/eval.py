@@ -13,7 +13,8 @@ from rich import print as rprint
 
 from parnassus_core.data import EagerDataset
 
-from parnassus_core.evaluation.config import EvaluationConfig
+from parnassus_core.evaluation.config import DatasetConfig, EvaluationConfig
+from parnassus_core.evaluation.event_filter import ScatEClassifier, ScatESelector
 from parnassus_core.evaluation.model import EvaluationModel
 
 
@@ -60,18 +61,61 @@ def limit_cpu_threads(num_workers: int, max_threads: int = 8) -> int:
     return torch.get_num_threads()
 
 
+def build_eval_dataset(
+    config: EvaluationConfig,
+    ds_config: DatasetConfig,
+    n_events: int,
+    event_selector: ScatESelector | None = None,
+) -> EagerDataset:
+    """The eval-mode dataset of one ``datasets`` entry of ``config``.
+
+    Parameters
+    ----------
+    config : EvaluationConfig
+        The evaluation config.
+    ds_config : DatasetConfig
+        The dataset to load (a ROOT file or LUND input).
+    n_events : int
+        Events to load; with ``event_selector``, events it keeps.
+    event_selector : ScatESelector or None
+        Pre-filter applied while reading.
+
+    Returns
+    -------
+    EagerDataset
+    """
+    return EagerDataset(
+        ds_config.path,
+        max_particles=config.data_config.max_particles,
+        train_type="event",
+        sin_cos=True,
+        zero_neutral_vtx=False,
+        scale_dict=config.scale_dict,
+        var_dict=config.var_dict,
+        reduce_ds=n_events,
+        entry_start=0,
+        mode="eval",
+        recalculate_ip=config.recalculate_ip,
+        eta_clamp=config.data_config.eta_clamp,
+        class_based_scaling=config.data_config.class_based_scaling,
+        event_selector=event_selector,
+    )
+
+
 def write_eval_output(
     path: Path,
     pflow: dict[str, np.ndarray],
     truth: dict[str, np.ndarray],
     event_number: np.ndarray,
     config: EvaluationConfig,
+    extra_metadata: dict[str, str] | None = None,
 ) -> None:
     """Write generated events as jagged ``pflow`` / ``truth`` records.
 
     Each ``(n_events, max_particles)`` column is stored as a variable-length
     float32 list per event (always ``max_particles`` long), with ``ind``
-    marking the real particles.
+    marking the real particles.  ``extra_metadata`` entries are written as
+    ``metadata/<key>`` strings next to the model provenance.
     """
 
     def to_record(columns: dict[str, np.ndarray]) -> ak.Array:
@@ -98,6 +142,8 @@ def write_eval_output(
             file["metadata/impact_model"] = (
                 f"{config.impact_model.ckpt_path} {config.impact_model.n_steps}"
             )
+        for key, value in (extra_metadata or {}).items():
+            file[f"metadata/{key}"] = value
 
 
 def main():
@@ -110,25 +156,33 @@ def main():
     model = EvaluationModel(config)
     model.to(device)
     model.compile_models()
+    filter_config = config.scatE_filter
+    classifier = (
+        ScatEClassifier.load(filter_config.ckpt_path, device)
+        if filter_config is not None
+        else None
+    )
 
     for ds_config in config.data_config.datasets:
         rprint(f"[bold blue]Evaluating on dataset:[/bold blue] {ds_config.path}")
         eval_subpath = config.eval_path / ds_config.name
-        dataset = EagerDataset(
-            ds_config.path,
-            max_particles=config.data_config.max_particles,
-            train_type="event",
-            sin_cos=True,
-            zero_neutral_vtx=False,
-            scale_dict=config.scale_dict,
-            var_dict=config.var_dict,
-            reduce_ds=args.n_events if args.n_events else ds_config.n_events,
-            entry_start=0,
-            mode="eval",
-            recalculate_ip=config.recalculate_ip,
-            eta_clamp=config.data_config.eta_clamp,
-            class_based_scaling=config.data_config.class_based_scaling,
+        # A fresh selector per dataset, so each dataset's selection is
+        # reproducible from the seed on its own.
+        selector = (
+            ScatESelector.from_config(filter_config, classifier)
+            if filter_config is not None and classifier is not None
+            else None
         )
+        dataset = build_eval_dataset(
+            config,
+            ds_config,
+            args.n_events if args.n_events else ds_config.n_events,
+            event_selector=selector,
+        )
+        extra_metadata = {}
+        if selector is not None:
+            selector.report()
+            extra_metadata["scatE_filter"] = selector.describe()
         loader = DataLoader(
             dataset,
             num_workers=args.num_workers,
@@ -183,7 +237,14 @@ def main():
         eval_subpath = eval_subpath.with_stem(
             eval_subpath.stem + f"_eval_{(n // 1000):d}k{args.suffix}.root"
         )
-        write_eval_output(eval_subpath, l_fs_data, l_tr_data, l_eventNumber, config)
+        write_eval_output(
+            eval_subpath,
+            l_fs_data,
+            l_tr_data,
+            l_eventNumber,
+            config,
+            extra_metadata=extra_metadata,
+        )
         if len(bad_idxs) > 0:
             rprint(f"[bold red]Found {len(bad_idxs)} bad events:[/bold red] {bad_idxs}")
         rprint(f"[bold green]Done:[/bold green] Saved to {eval_subpath.absolute()}")

@@ -73,22 +73,23 @@ class EvaluationModel(nn.Module):
         )
 
         self.fs_var_idx_dict = self._get_fs_var_idxs()
-        self.ht_shift = self.feature_scaler[self.ht_key].shift
-        self.ht_scale = self.feature_scaler[self.ht_key].scale
-        self.min_ht_scaled = -self.ht_shift / self.ht_scale
+        self.ht_p_shift = self.feature_scaler["ht_p"].shift
+        self.ht_p_scale = self.feature_scaler["ht_p"].scale
+        self.min_ht_p_scaled = -self.ht_p_shift / self.ht_p_scale
 
     def _get_fs_var_idxs(self) -> dict[str, int]:
         idx_dict = {}
-        # Event models trained on the p analogue of ht carry ht_p instead; the
-        # empty-event veto in generate_event then uses the ht_p scaler.
+        # The scalar momentum sum ht_p drives the empty-event veto in
+        # generate_event.
         coll = self.unscaler.target_collection
         event_vars = self.fs_vars["event"]
-        self.ht_key = (
-            "ht_p"
-            if f"{coll}_ht" not in event_vars and f"{coll}_ht_p" in event_vars
-            else "ht"
-        )
-        idx_dict["ht"] = event_vars.index(f"{coll}_{self.ht_key}")
+        ht_p_var = f"{coll}_ht_p"
+        if ht_p_var not in event_vars:
+            raise ValueError(
+                f"fs_vars.event must contain {ht_p_var}: the empty-event veto "
+                f"uses the generated scalar momentum sum. Got {event_vars}."
+            )
+        idx_dict["ht_p"] = event_vars.index(ht_p_var)
         idx_dict["npart"] = self.fs_vars["event"].index(
             f"n{self.unscaler.target_collection}"
         )
@@ -219,7 +220,7 @@ class EvaluationModel(nn.Module):
                 to_cpu=False,
             ),
         )
-        fs_ht = fs_evt[..., self.fs_var_idx_dict["ht"]]
+        fs_ht_p = fs_evt[..., self.fs_var_idx_dict["ht_p"]]
         # The npart target is an exact integer during training
         # (``collection_masks[coll].sum(-1)``, see data/physics_data.py), so the
         # matching inverse is the nearest integer.  Rounding also makes "the
@@ -235,7 +236,7 @@ class EvaluationModel(nn.Module):
         # particle stage has no targets to generate for them.
         good_evt_mask = (
             (fs_npart >= 1)
-            & (fs_ht > self.min_ht_scaled)
+            & (fs_ht_p > self.min_ht_p_scaled)
             & (fs_npart < self.max_particles)
         )
         bad_idxs = torch.argwhere(~good_evt_mask).flatten().cpu().numpy()

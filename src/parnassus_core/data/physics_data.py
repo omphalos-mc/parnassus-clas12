@@ -94,7 +94,7 @@ def build_ctxt_data(
 
     Args:
         ctxt_vars: Variable names with collection prefixes
-            (e.g. ``["truth_ptrel", "truth_eta", "pflow_ptrel"]``).
+            (e.g. ``["truth_p", "truth_theta", "pflow_p"]``).
         collection_data: ``{collection: {bare_var: Tensor(…, N)}}``.
         collection_masks: ``{collection: BoolTensor(…, N)}``.
         sin_cos: Apply sin/cos transform to phi variables.

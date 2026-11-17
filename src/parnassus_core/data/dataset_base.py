@@ -6,9 +6,9 @@ assembly, and output-key logic lives here.  Subclasses only override
 
 Subclasses
 ----------
-``EagerDataset``  (ROOT)
+``EagerDataset``  (ROOT, LUND)
     Loads everything at ``__init__``, stores per-collection ragged arrays +
-    cumsum.  ``_get_collections(int)`` slices one event, sorts by ptrel,
+    cumsum.  ``_get_collections(int)`` slices one event, sorts by p,
     pads to ``max_particles``.
 
 ``StreamingDataset``  (HDF5)
@@ -239,9 +239,9 @@ class PhysicsDatasetBase(Dataset, ABC):
     ]:
         """Produce data in the common intermediate format.
 
-        EagerDataset (ROOT)
+        EagerDataset (ROOT, LUND)
             ``idx`` is ``int``.  Cumsum-slice one event from per-collection
-            ragged arrays, sort by ptrel descending, pad to
+            ragged arrays, sort by p descending, pad to
             ``max_particles``.  Returns pre-computed means.
 
         StreamingDataset (HDF5)

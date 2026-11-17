@@ -1,32 +1,31 @@
 """Time every stage of the CLAS12 fast-simulation inference chain on one GPU.
 
-Runs the chain of ``scripts/run_evaluation_chain.sh`` (minus postprocessing)
-and reports wall time and throughput per stage::
+Runs the chain of ``evaluation/eval.py`` on the config's first dataset and
+reports wall time and throughput per stage::
 
-    scatE pre-filter   AllEvents ROOT -> read -> features -> classifier
-                       -> Bernoulli select -> write filtered ROOT
-    dataset load       filtered ROOT -> EagerDataset (ROOT read, preprocessing)
+    scatE pre-filter   input -> read feature branches -> features -> classifier
+                       -> Bernoulli select   (only with a scatE_filter block)
+    dataset load       kept events -> EagerDataset (read, preprocessing)
     generation loop    batch assembly -> host->device -> event net -> glue
                        -> particle net -> unscale + device->host -> collect
     output             ROOT write
 
-Each stage follows the production code path. The pre-filter loop is
-``scatE_filter.main`` with a timer around each step. The generation loop is
-``evaluation/eval.py``, with ``EvaluationModel``'s ``event_model.sample``,
-``particle_model.sample`` and ``unscaler.unscale_variables`` wrapped in timers;
-"glue" is whatever ``generate_event`` spends outside those three (the
-empty-event veto, count rounding, masking). CUDA is synchronized at every stage
-boundary so each stage is charged for its own kernels.
+Each stage follows the production code path: the dataset is built with
+``eval.build_eval_dataset``, whose ``FilteredFileLoader`` selection pass is the
+pre-filter stage. ``first_electron_features`` and ``ScatEClassifier.predict``
+are timed inside it; the rest of the pass is the file read and the selection.
+The generation loop is ``evaluation/eval.py``'s, with ``EvaluationModel``'s
+``event_model.sample``, ``particle_model.sample`` and
+``unscaler.unscale_variables`` wrapped in timers; "glue" is whatever
+``generate_event`` spends outside those three (the empty-event veto, count
+rounding, masking). CUDA is synchronized at every stage boundary so each stage
+is charged for its own kernels.
 
-Two deliberate departures from the production chain:
-
-* The dataset stage loads the config's filtered file -- what eval.py reads --
-  rather than the file this script's pre-filter just wrote, so its read time is
-  a cold CFS read as in production, not a page-cache hit. The pre-filter and
-  eval outputs go to a scratch ``--work-dir`` and are deleted afterwards.
-* ``--warmup-batches`` batches are generated and discarded before the timed
-  loop, so the loop measures steady state. The warm-up is reported as one-time
-  setup, alongside checkpoint loading.
+One deliberate departure from the production chain: ``--warmup-batches``
+batches are generated and discarded before the timed loop, so the loop measures
+steady state. The warm-up is reported as one-time setup, alongside checkpoint
+loading. The eval output goes to a scratch ``--work-dir`` and is deleted
+afterwards.
 
 The report is printed and saved, with a JSON copy of the raw numbers, to
 ``<eval_path>/logs/speed_test_<timestamp>.{log,json}``.
@@ -36,8 +35,7 @@ Example
 ::
 
     python -m parnassus_core.experiments.clas12_RGA.evaluation.speed_test \\
-        -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/config.yaml \\
-        --filter-input ../parnassus_data/v8/v8_test.root
+        -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/config.yaml
 """
 
 import argparse
@@ -56,10 +54,8 @@ from pathlib import Path
 from typing import Any, NamedTuple, TypeAlias
 from unittest import mock
 
-import awkward as ak
 import numpy as np
 import torch
-import uproot
 from rich import box
 from rich.console import Console
 from rich.markup import escape
@@ -68,20 +64,26 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from parnassus_core.data import EagerDataset
-from parnassus_core.data.loaders.root_loader import ROOTFileLoader
-from parnassus_core.evaluation.config import EvaluationConfig
-from parnassus_core.evaluation.eval import limit_cpu_threads, write_eval_output
-from parnassus_core.evaluation.model import EvaluationModel
-from parnassus_core.experiments.clas12_RGA.evaluation.scatE_filter import (
-    DEFAULT_CKPT,
-    INPUT_FIELDS,
-    ScatEMLP,
-    build_features,
-    load_classifier,
-    predict_proba,
+from parnassus_core.data.loaders import (
+    FileLoader,
+    FilteredFileLoader,
+    LUNDFileLoader,
+    ROOTFileLoader,
+    is_lund_path,
 )
-
-TREE_NAME = "evt_tree"
+from parnassus_core.evaluation import event_filter
+from parnassus_core.evaluation.config import EvaluationConfig
+from parnassus_core.evaluation.eval import (
+    build_eval_dataset,
+    limit_cpu_threads,
+    write_eval_output,
+)
+from parnassus_core.evaluation.event_filter import (
+    INPUT_FIELDS,
+    ScatEClassifier,
+    ScatESelector,
+)
+from parnassus_core.evaluation.model import EvaluationModel
 
 _EXHAUSTED = object()
 
@@ -206,120 +208,44 @@ class Row(NamedTuple):
 Section: TypeAlias = tuple[str, list[Row]]
 
 
-def time_prefilter(
-    input_path: Path,
-    output_path: Path,
-    classifier: tuple[ScatEMLP, np.ndarray, np.ndarray],
-    *,
-    n_read: int,
-    n_keep: int,
-    chunk_size: int,
-    seed: int,
-    device: torch.device,
-    timer: StageTimer,
-) -> tuple[int, int]:
-    """Run ``scatE_filter --mode sample`` with each step timed.
-
-    Same loop as ``scatE_filter.main``: read every branch chunk by chunk, keep
-    events by Bernoulli-sampling the classifier probability, append the kept
-    events to ``output_path``, and stop after the chunk that reaches
-    ``n_keep``. The closure report is skipped, as it is diagnostics rather than
-    part of the chain.
-
-    Returns
-    -------
-    tuple[int, int]
-        Events read and events kept.
-    """
-    model, mean, std = classifier
-    rng = np.random.default_rng(seed)
-    n_total = 0
-    n_kept = 0
-    tree_created = False
-
-    with timer("prefilter/total") as total:
-        with timer("prefilter/read"):
-            tree = uproot.open(f"{input_path}:{TREE_NAME}")
-            branches = list(tree.keys())
-            entry_stop = min(tree.num_entries, n_read)
-            chunks = tree.iterate(branches, step_size=chunk_size, entry_stop=entry_stop)
-
-        progress = tqdm(total=entry_stop, unit="evt", desc="Pre-filter")
-        with uproot.recreate(output_path) as fout:
-            while n_kept < n_keep:
-                with timer("prefilter/read") as read:
-                    chunk = next(chunks, None)
-                if chunk is None:
-                    break
-                n_chunk = len(chunk)
-                read.events += n_chunk
-
-                with timer("prefilter/features", n_chunk):
-                    features, valid = build_features(chunk)
-
-                with timer("prefilter/classifier", n_chunk):
-                    prob = np.zeros(n_chunk, dtype=np.float32)
-                    if valid.any():
-                        prob[valid] = predict_proba(
-                            model, features[valid], mean, std, device
-                        )
-
-                with timer("prefilter/select", n_chunk):
-                    keep = rng.random(n_chunk) < prob
-                    kept = {name: chunk[name][keep] for name in branches}
-                    kept["scatE_prob"] = prob[keep]
-
-                with timer("prefilter/write", n_chunk):
-                    if not tree_created:
-                        fout.mktree(
-                            TREE_NAME,
-                            {
-                                **{name: ak.type(chunk[name]) for name in branches},
-                                "scatE_prob": np.float32,
-                            },
-                        )
-                        tree_created = True
-                    if keep.any():
-                        fout[TREE_NAME].extend(kept)  # type: ignore[union-attr]
-
-                n_total += n_chunk
-                n_kept += int(keep.sum())
-                progress.update(n_chunk)
-        progress.close()
-    total.events = n_total
-    return n_total, n_kept
-
-
 def time_dataset_load(
-    config: EvaluationConfig, n_events: int, timer: StageTimer
+    config: EvaluationConfig,
+    n_events: int,
+    selector: ScatESelector | None,
+    timer: StageTimer,
 ) -> EagerDataset:
-    """Build the eval dataset exactly as eval.py does, timing the ROOT reads.
+    """Build the eval dataset exactly as eval.py does, timing its stages.
 
-    Everything ``EagerDataset.__init__`` spends outside ``ROOTFileLoader``'s
-    reads is preprocessing (flattening, phi wrapping, derived event variables,
-    per-event means).
+    With a ``selector``, the ``FilteredFileLoader`` selection pass is the
+    pre-filter (``filter/*``), and the later reads of the kept events go
+    through the wrapper (``dataset/read``).  Everything else
+    ``EagerDataset.__init__`` spends is preprocessing (flattening, phi
+    wrapping, derived event variables, per-event means).
     """
     ds_config = config.data_config.datasets[0]
+    read_owner: type[FileLoader]
+    if selector is not None:
+        read_owner = FilteredFileLoader
+    elif is_lund_path(ds_config.path):
+        read_owner = LUNDFileLoader
+    else:
+        read_owner = ROOTFileLoader
     with ExitStack() as stack:
-        timer.instrument(stack, ROOTFileLoader, "load_branches", "dataset/read")
-        timer.instrument_iter(stack, ROOTFileLoader, "iter_branches", "dataset/read")
+        timer.instrument(stack, read_owner, "load_branches", "dataset/read")
+        timer.instrument_iter(stack, read_owner, "iter_branches", "dataset/read")
+        if selector is not None:
+            timer.instrument(stack, FilteredFileLoader, "_select", "filter/total")
+            timer.instrument(
+                stack, event_filter, "first_electron_features", "filter/features"
+            )
+            timer.instrument(stack, ScatEClassifier, "predict", "filter/classifier")
         with timer("dataset/total") as total:
-            dataset = EagerDataset(
-                ds_config.path,
-                max_particles=config.data_config.max_particles,
-                train_type="event",
-                sin_cos=True,
-                zero_neutral_vtx=False,
-                scale_dict=config.scale_dict,
-                var_dict=config.var_dict,
-                reduce_ds=n_events,
-                entry_start=0,
-                mode="eval",
-                recalculate_ip=config.recalculate_ip,
-                eta_clamp=config.data_config.eta_clamp,
-                class_based_scaling=config.data_config.class_based_scaling,
+            dataset = build_eval_dataset(
+                config, ds_config, n_events, event_selector=selector
             )
     total.events = timer.stages["dataset/read"].events = len(dataset)
+    if selector is not None:
+        timer.stages["filter/total"].events = selector.n_classified
     return dataset
 
 
@@ -475,8 +401,8 @@ def build_report(
     time the section spent outside its named stages.
     """
     sec = timer.seconds
-    n_read, n_loaded, n_generated = (
-        counts["prefilter_read"],
+    n_classified, n_loaded, n_generated = (
+        counts["filter_classified"],
         counts["dataset_loaded"],
         counts["generated"],
     )
@@ -497,24 +423,22 @@ def build_report(
         ),
     ]
 
-    prefilter_total = sec("prefilter/total")
+    # The pre-filter pass runs inside the dataset load; report it on its own.
+    prefilter_total = sec("filter/total")
     prefilter = [
-        Row("ROOT read (all branches)", sec("prefilter/read"), n_read),
-        Row("Feature build", sec("prefilter/features"), n_read),
-        Row("Classifier MLP", sec("prefilter/classifier"), n_read),
-        Row("Bernoulli selection", sec("prefilter/select"), n_read),
-        Row("ROOT write (kept events)", sec("prefilter/write"), n_read),
+        Row("Feature build", sec("filter/features"), n_classified),
+        Row("Classifier MLP", sec("filter/classifier"), n_classified),
     ]
-    prefilter_other = prefilter_total - sum(row.seconds for row in prefilter)
+    prefilter_rest = prefilter_total - sum(row.seconds for row in prefilter)
     prefilter += [
-        Row("other", max(0.0, prefilter_other)),
-        Row("total", prefilter_total, n_read),
+        Row("File read (feature branches) + selection", max(0.0, prefilter_rest)),
+        Row("total", prefilter_total, n_classified),
     ]
 
     dataset_read = sec("dataset/read")
-    dataset_total = sec("dataset/total")
+    dataset_total = sec("dataset/total") - prefilter_total
     dataset = [
-        Row("ROOT read", dataset_read, n_loaded),
+        Row("File read (kept events)", dataset_read, n_loaded),
         Row("Preprocessing", dataset_total - dataset_read, n_loaded),
         Row("total", dataset_total, n_loaded),
     ]
@@ -576,9 +500,12 @@ def build_report(
         ),
     ]
 
-    sections = [
-        ("One-time setup", setup),
-        (f"scatE pre-filter  ({n_read:,} events read)", prefilter),
+    sections = [("One-time setup", setup)]
+    if meta["scatE_filter"]:
+        sections.append(
+            (f"scatE pre-filter  ({n_classified:,} events classified)", prefilter)
+        )
+    sections += [
         (f"Dataset load  ({n_loaded:,} events)", dataset),
         (f"Generation loop  (batch size {meta['batch_size']:,})", generation),
         (f"Output  ({n_generated:,} events)", output),
@@ -611,9 +538,14 @@ def print_report(
         info.add_row(key, escape(str(value)))
     console.rule("[bold blue]Parnassus inference speed test")
     console.print(info)
+    prefilter = (
+        f"{counts['filter_classified']:,} classified by the pre-filter, "
+        f"{counts['filter_accepted']:,} accepted; "
+        if meta["scatE_filter"]
+        else ""
+    )
     console.print(
-        f"\nevents: {counts['prefilter_read']:,} read by the pre-filter, "
-        f"{counts['prefilter_kept']:,} kept; {counts['dataset_loaded']:,} loaded "
+        f"\nevents: {prefilter}{counts['dataset_loaded']:,} loaded "
         f"for generation, {counts['generated']:,} generated "
         f"({counts['dataset_loaded'] - counts['generated']:,} vetoed by "
         "generate_event)"
@@ -658,48 +590,27 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("-c", "--config", type=str, required=True)
     parser.add_argument(
-        "--filter-input",
-        type=str,
-        required=True,
-        help="Unfiltered AllEvents ROOT file the scatE pre-filter reads.",
-    )
-    parser.add_argument(
         "-ne",
         "--n-events",
         type=int,
         default=None,
-        help="Events to generate. Default: the config's first dataset n_events.",
+        help="Events to load for generation (kept events, with the config's "
+        "scatE_filter). Default: the config's first dataset n_events.",
     )
     parser.add_argument("-bs", "--batch-size", type=int, default=4096)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--warmup-batches", type=int, default=1)
-    parser.add_argument("--filter-ckpt", type=str, default=DEFAULT_CKPT)
-    parser.add_argument(
-        "--n-read",
-        type=int,
-        default=2_700_000,
-        help="Cap on events the pre-filter reads.",
-    )
-    parser.add_argument(
-        "--n-keep",
-        type=int,
-        default=None,
-        help="Pre-filter stops after the chunk reaching this many kept events. "
-        "Default: --n-events.",
-    )
-    parser.add_argument("--chunk-size", type=int, default=200_000)
-    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--work-dir",
         type=str,
         default=None,
-        help="Where the transient filter/eval ROOT outputs go. "
+        help="Where the transient eval ROOT output goes. "
         "Default: $SCRATCH/parnassus_speed_test.",
     )
     parser.add_argument(
         "--keep-outputs",
         action="store_true",
-        help="Keep the transient ROOT outputs instead of deleting them.",
+        help="Keep the transient ROOT output instead of deleting it.",
     )
     parser.add_argument(
         "--skip-write", action="store_true", help="Skip the final ROOT write."
@@ -722,8 +633,8 @@ def main() -> None:
     timer = StageTimer(device)
 
     config = EvaluationConfig.from_yaml(args.config)
+    filter_config = config.scatE_filter
     n_events = args.n_events or config.data_config.datasets[0].n_events
-    n_keep = args.n_keep or n_events
     log_dir = Path(args.log_dir) if args.log_dir else config.eval_path / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -742,29 +653,17 @@ def main() -> None:
             model = EvaluationModel(config)
             model.to(device)
             model.compile_models()
-        with timer("setup/classifier"):
-            classifier, mean, std, _ = load_classifier(args.filter_ckpt, device)
-            # First-call cuBLAS setup belongs to setup, not to the first chunk.
-            predict_proba(
-                classifier,
-                np.zeros((1024, len(INPUT_FIELDS)), dtype=np.float32),
-                mean,
-                std,
-                device,
-            )
+        selector = None
+        if filter_config is not None:
+            with timer("setup/classifier"):
+                classifier = ScatEClassifier.load(filter_config.ckpt_path, device)
+                # First-call cuBLAS setup belongs to setup, not to the first chunk.
+                classifier.predict(
+                    np.zeros((1024, len(INPUT_FIELDS)), dtype=np.float32)
+                )
+            selector = ScatESelector.from_config(filter_config, classifier)
 
-        n_read, n_kept = time_prefilter(
-            Path(args.filter_input),
-            work_dir / "filtered.root",
-            (classifier, mean, std),
-            n_read=args.n_read,
-            n_keep=n_keep,
-            chunk_size=args.chunk_size,
-            seed=args.seed,
-            device=device,
-            timer=timer,
-        )
-        dataset = time_dataset_load(config, n_events, timer)
+        dataset = time_dataset_load(config, n_events, selector, timer)
         events = time_generation(
             model,
             dataset,
@@ -789,8 +688,8 @@ def main() -> None:
             shutil.rmtree(work_dir, ignore_errors=True)
 
     counts = {
-        "prefilter_read": n_read,
-        "prefilter_kept": n_kept,
+        "filter_classified": selector.n_classified if selector is not None else 0,
+        "filter_accepted": selector.n_accepted if selector is not None else 0,
         "dataset_loaded": len(dataset),
         "generated": len(events.event_number),
     }
@@ -808,8 +707,7 @@ def main() -> None:
         "event_ckpt": str(config.event_model.ckpt_path),
         "particle_ckpt": str(config.particle_model.ckpt_path),
         "eval_dataset": str(config.data_config.datasets[0].path),
-        "filter_input": args.filter_input,
-        "filter_ckpt": args.filter_ckpt,
+        "scatE_filter": selector.describe() if selector is not None else "",
         "batch_size": args.batch_size,
         "num_workers": args.num_workers,
         "trim_padding": config.trim_padding,

@@ -5,6 +5,7 @@ PhysicsDataset uses this interface to load data in a backend-agnostic way.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 
 import numpy as np
 
@@ -21,6 +22,8 @@ class FileLoader(ABC):
     Implementations:
     - ROOTFileLoader: Loads data from ROOT files via uproot
     - HDF5FileLoader: Loads data from HDF5 files via h5py
+    - LUNDFileLoader: Loads generator-level particles from LUND text files
+    - FilteredFileLoader: Wraps another loader, exposing only selected events
     """
 
     def __init__(
@@ -60,8 +63,8 @@ class FileLoader(ABC):
             For HDF5: padded 2D arrays with corresponding valid mask
 
         Example:
-            >>> loader.load_particle_collection("truth", ["pt", "eta"], 0, 100)
-            {"pt": array([...]), "eta": array([...])}
+            >>> loader.load_particle_collection("truth", ["p", "theta"], 0, 100)
+            {"p": array([...]), "theta": array([...])}
         """
         ...
 
@@ -86,6 +89,28 @@ class FileLoader(ABC):
         """
         raise NotImplementedError(
             f"{type(self).__name__} does not implement load_branches()"
+        )
+
+    def iter_branches(
+        self,
+        branch_names: list[str],
+        entry_start: int,
+        entry_stop: int | None,
+        step_size: int,
+    ) -> Iterator[dict[str, np.ndarray]]:
+        """Yield :meth:`load_branches` output in chunks of ``step_size`` events.
+
+        Optional, like :meth:`load_branches`.  ``entry_stop=None`` reads to the
+        end of the file.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement iter_branches()"
+        )
+
+    def has_branch(self, name: str) -> bool:
+        """Whether the file provides the branch ``name``.  Optional."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement has_branch()"
         )
 
     @abstractmethod

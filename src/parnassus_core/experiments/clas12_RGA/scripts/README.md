@@ -8,7 +8,7 @@ geometry.
 |---|---|
 | `submit_train_event.sh` | Trains the event model, `configs/event.yaml` (DDP, multi-node) |
 | `submit_train_particle.sh` | Trains the particle model, `configs/particle.yaml` |
-| `run_evaluation_chain.sh` | `scatE_filter` (sample and truth modes) → `eval.py` → `postprocess_eval.py` |
+| `run_evaluation_chain.sh` | `scatE_filter.py` (full-sim reference) → `eval.py` (scatE-filtered) → `postprocess_eval.py` |
 | `run_speed_test.sh` | Times every stage of the inference chain (`evaluation/speed_test.py`) |
 | `submit_test_event_parallel.sh` | Lightning `test` of several event-model checkpoints and solvers, in parallel |
 | `submit_test_particle_parallel.sh` | The same for the particle model, then `postprocess_eval` with `postprocess_df.yaml` |
@@ -29,11 +29,11 @@ sbatch -A <account> src/parnassus_core/experiments/clas12_RGA/scripts/<script>.s
   `$DATA`. Pass `--dry_run` to run one training step on the current node (no allocation
   needed).
 - The evaluation scripts read the three paper checkpoints from
-  [`pre-trained-models/`](../pre-trained-models/README.md): the classifier through `scatE_filter.py`'s default `--ckpt`, the event and particle models
-  through `ckpt_path` in `evaluation/configs/config.yaml`. Edit `data.top_folder` in that
-  config for your copy of the data.
-- `run_evaluation_chain.sh` writes the filtered samples into `$DATA/v8/` and skips
-  that step when they already exist (`--refilter` rebuilds them).
+  [`pre-trained-models/`](../pre-trained-models/README.md) through the `ckpt_path` keys in
+  `evaluation/configs/config.yaml`. Edit `data.top_folder` in that config for your copy of
+  the data.
+- `run_evaluation_chain.sh` writes the full-sim reference into `$DATA/v8/` and skips
+  that step when it already exists (`--refilter` rebuilds it).
 - The two `submit_test_*_parallel.sh` scripts are run with `bash` inside an interactive
   allocation, not with `sbatch`; their headers give the `salloc` line and the ways to pick
   checkpoints (`-d <run_dir> -e <epochs> -w none|EMA|SWA`, or explicit paths). Outputs are
@@ -43,7 +43,7 @@ sbatch -A <account> src/parnassus_core/experiments/clas12_RGA/scripts/<script>.s
 
 ```bash
 sbatch -A <account> src/parnassus_core/experiments/clas12_RGA/scripts/run_evaluation_chain.sh \
-    --refilter --n-read 29910000 --n-keep 29910000 --suffix _paper --skip-postprocess
+    --refilter --n-read 29910000 --n-events 29910000 --suffix _paper --skip-postprocess
 python -m parnassus_core.evaluation.postprocess_eval \
     -i clasdis_filtered/clasdis_filtered_eval_5862k_paper.root \
     -d $DATA/v8/v8_test_filtered_truth.root \

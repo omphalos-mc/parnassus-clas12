@@ -4,6 +4,8 @@ from pathlib import Path
 from dataclasses import dataclass, field
 
 from rich import print as rprint
+from parnassus_core.data.loaders import is_lund_path, resolve_lund_files
+from parnassus_core.evaluation.event_filter import SELECTION_MODES
 from parnassus_core.flow.sampling import SamplerType
 
 DEFAULT_MAX_PARTICLES = 400
@@ -31,13 +33,52 @@ class ModelConfig:
 
 
 @dataclass
+class ScatEFilterConfig:
+    """Scattered-electron pre-filter applied to every dataset of the config.
+
+    See :mod:`parnassus_core.evaluation.event_filter`.  The full-simulation
+    reference (events with ``pflow_scatE == 1``) is not a classifier selection;
+    it is written by ``experiments/clas12_RGA/evaluation/scatE_filter.py``.
+    """
+
+    ckpt_path: str | Path
+    mode: str = "sample"
+    threshold: float = 0.5
+    seed: int = 0
+
+    def __post_init__(self):
+        if self.mode == "truth":
+            raise ValueError(
+                "scatE_filter mode 'truth' needs the reconstructed pflow_scatE "
+                "label, which the generated events do not have. Build the "
+                "full-simulation reference with "
+                "experiments/clas12_RGA/evaluation/scatE_filter.py instead."
+            )
+        if self.mode not in SELECTION_MODES:
+            raise ValueError(
+                f"Invalid scatE_filter mode: {self.mode}. "
+                f"Expected one of {SELECTION_MODES}."
+            )
+        assert 0.0 <= self.threshold <= 1.0, (
+            f"scatE_filter threshold must lie in [0, 1], got {self.threshold}."
+        )
+        self.ckpt_path = Path(self.ckpt_path)
+        assert self.ckpt_path.exists(), (
+            f"scatE classifier checkpoint {self.ckpt_path} does not exist."
+        )
+
+
+@dataclass
 class DatasetConfig:
     name: str
     path: str
     n_events: int
 
     def __post_init__(self):
-        assert Path(self.path).exists(), f"Dataset path {self.path} does not exist."
+        if is_lund_path(self.path):
+            resolve_lund_files(self.path)  # raises when nothing matches
+        else:
+            assert Path(self.path).exists(), f"Dataset path {self.path} does not exist."
         assert self.n_events > 0, "Number of events must be a positive integer."
 
 
@@ -140,6 +181,8 @@ class EvaluationConfig:
     event_model: ModelConfig
     particle_model: ModelConfig
     impact_model: ModelConfig | None = None
+    # Applied while reading each dataset; n_events then counts kept events.
+    scatE_filter: ScatEFilterConfig | None = None
     recalculate_ip: bool = False
     # Hand each network only the particle slots some event in the batch uses,
     # instead of all max_particles; exact for masked attention (see
@@ -182,6 +225,11 @@ class EvaluationConfig:
             if "impact_model" in config_data
             else None
         )
+        scatE_filter = (
+            ScatEFilterConfig(**config_data["scatE_filter"])
+            if config_data.get("scatE_filter")
+            else None
+        )
 
         var_config = EvaluationVarConfig.from_yaml(var_dict)
 
@@ -194,6 +242,7 @@ class EvaluationConfig:
             event_model=event_model,
             particle_model=particle_model,
             impact_model=impact_model,
+            scatE_filter=scatE_filter,
             recalculate_ip=config_data.get("recalculate_ip", False),
             trim_padding=config_data.get("trim_padding", False),
             torch_compile=config_data.get("torch_compile", False),

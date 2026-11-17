@@ -6,10 +6,12 @@ events, that selection has to be simulated too. This classifier learns it: a sma
 maps the truth `(p, theta, phi)` of the scattered electron to `P(pflow_scatE == 1)`,
 a reconstruction efficiency in truth kinematics.
 
-[`evaluation/scatE_filter.py`](../evaluation/scatE_filter.py) uses the trained model to
-pre-filter an `AllEvents` sample before `eval.py`. Its default `sample` mode keeps each
-event with probability `P`, which reproduces the true efficiency because the classifier
-is well calibrated. See that module's docstring for the modes and the reference sample.
+`eval.py` applies the trained model while it reads the input, when the eval config has a
+`scatE_filter` block ([`parnassus_core/evaluation/event_filter.py`](../../../evaluation/event_filter.py)).
+Its default `sample` mode keeps each event with probability `P`, which reproduces the true
+efficiency because the classifier is well calibrated. See that module's docstring for the
+modes; the full-sim reference is written by
+[`evaluation/scatE_filter.py`](../evaluation/scatE_filter.py).
 
 ## Training
 
@@ -24,8 +26,8 @@ The input is any `evt_tree` file that keeps the events without a reconstructed e
 (`pflow_scatE` is both 0 and 1). The run writes `best_model.ckpt` (with the feature
 standardization stored inside it), `config.json`, `metrics.json`, `history.csv` and the
 loss, ROC and confusion-matrix plots into `--outdir` (default `trained_models/classifier`).
-`scatE_filter.py` reads the paper checkpoint by default; pass
-`--ckpt trained_models/classifier/best_model.ckpt` to use a new run instead.
+The eval config reads the paper checkpoint; set `scatE_filter.ckpt_path` to
+`trained_models/classifier/best_model.ckpt` to use a new run instead.
 
 ## The checkpoint used for the paper results
 

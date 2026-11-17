@@ -1,8 +1,9 @@
-"""Eager-loading dataset for ROOT files.
+"""Eager-loading dataset for ROOT and LUND files.
 
 ``EagerDataset`` loads all data into memory at ``__init__`` as per-collection
 ragged arrays with cumsum indexing.  Collection names are read from the YAML
-config ``vars_to_load`` section — nothing is hardcoded.
+config ``vars_to_load`` section — nothing is hardcoded.  The file reader is
+chosen from the path (see :func:`parnassus_core.data.loaders.open_file_loader`).
 """
 
 from __future__ import annotations
@@ -15,7 +16,12 @@ import torch
 from torch import Tensor
 
 from parnassus_core.data.dataset_base import PhysicsDatasetBase
-from parnassus_core.data.loaders.root_loader import ROOTFileLoader
+from parnassus_core.data.loaders import (
+    EventSelector,
+    FileLoader,
+    FilteredFileLoader,
+    open_file_loader,
+)
 from parnassus_core.data.physics_data import do_padding
 from parnassus_core.data.utils.computed_vars import (
     SPECIES_COUNTS,
@@ -85,7 +91,8 @@ class EagerDataset(PhysicsDatasetBase):
     Parameters
     ----------
     file_path : str
-        Path to the ROOT file.
+        Path to a ROOT file, or to LUND input (a ``.dat``/``.lund`` file, a
+        directory of them, or a glob); LUND input supports eval mode only.
     var_dict, scale_dict : str
         Paths to YAML variable-list and scaling configs.
     max_particles : int
@@ -100,9 +107,10 @@ class EagerDataset(PhysicsDatasetBase):
     ctxt_mask_type : ``"all"`` | ``"charged"`` | ``"neutral"``
         Context particles mask type.
     reduce_ds : float | int
-        Dataset size limit (``<1.0`` fraction, ``>=1.0`` count).
+        Dataset size limit (``<1.0`` fraction, ``>=1.0`` count).  With an
+        ``event_selector`` it counts selected events.
     entry_start : int
-        First event index.
+        First event index (of the selected events, with an ``event_selector``).
     mode : ``"train"`` | ``"test"`` | ``"eval"``
     recalculate_ip : bool
         Recompute impact parameters from vertex positions.
@@ -113,9 +121,13 @@ class EagerDataset(PhysicsDatasetBase):
     class_based_scaling : bool
         Whether to use class-aware scaling (requires one-hot class features).
     chunk_size : int
-        Number of events read from the ROOT file per chunk while loading.
+        Number of events read from the file per chunk while loading.
         Bounds the transient memory of the ragged reads; the loaded data does
         not depend on it.
+    event_selector : EventSelector or None
+        Per-event selection applied while reading (see
+        :class:`~parnassus_core.data.loaders.FilteredFileLoader`): only the
+        selected events are loaded, so memory scales with them.
     """
 
     def __init__(
@@ -138,6 +150,7 @@ class EagerDataset(PhysicsDatasetBase):
         class_based_scaling: bool = False,
         eta_clamp: tuple[float, float] | None = (-3.0, 3.0),
         chunk_size: int = 1_000_000,
+        event_selector: EventSelector | None = None,
     ):
         super().__init__(
             var_dict=var_dict,
@@ -155,12 +168,19 @@ class EagerDataset(PhysicsDatasetBase):
         )
 
         # ---- Open loader ----
-        loader = ROOTFileLoader(
+        # Events past this index are never read, so readers that parse
+        # sequentially (LUND) can stop there.
+        event_cap = entry_start + int(reduce_ds) if reduce_ds >= 1.0 else None
+        loader: FileLoader = open_file_loader(
             file_path,
             tree_name=tree_name,
             num_workers=num_workers,
             variable_remapping=self._vcfg.variable_remapping,
+            # With a selector the cap applies to selected events, not file events.
+            max_events=None if event_selector is not None else event_cap,
         )
+        if event_selector is not None:
+            loader = FilteredFileLoader(loader, event_selector, max_kept=event_cap)
 
         # ---- Determine event range ----
         total_events = loader.get_total_events()
@@ -315,10 +335,18 @@ class EagerDataset(PhysicsDatasetBase):
             self._event_data["pv_y"] = pv_y[event_mask]  # type: ignore
             self._event_data["pv_z"] = pv_z[event_mask]  # type: ignore
 
-        # ---- Derived vars: ht, met, species counts, ptrel, charge (vectorized) ----
+        # ---- Derived vars: ht_p, species counts, Pxh/Pyh, charge (vectorized) ----
         for coll_name in self._collections_to_load:
             data = self._particle_data[coll_name]
             info = self._collection_info[coll_name]
+
+            missing_kinematics = {"p", "theta", "phi"} - data.keys()
+            if missing_kinematics:
+                raise ValueError(
+                    f"Collection '{coll_name}' needs {sorted(missing_kinematics)} "
+                    "in vars_to_load: the derived event variables and the "
+                    "particle ordering are built from p, theta and phi."
+                )
 
             # Ng/Nn and Pxh/Pyh are the pdgId-derived event vars. Without pdgId
             # they would just be absent, surfacing much later as a KeyError from
@@ -336,25 +364,22 @@ class EagerDataset(PhysicsDatasetBase):
                         f"'{coll_name}': add '{coll_name}_pdgId' to vars_to_load."
                     )
 
-            # pt feeds only the derived vars; when it is not loaded, rebuild it
-            # from p and theta here rather than storing it per particle.
-            pt = data["pt"] if "pt" in data else data["p"] * np.sin(data["theta"])
             derived = ComputedVariables.compute_flat_derived(
-                pt_flat=pt,
+                p_flat=data["p"],
+                theta_flat=data["theta"],
                 phi_flat=data["phi"],
                 n_particles=info.n_particles,  # type: ignore
                 cumsum=info.cumsum,  # type: ignore
                 pdgId_flat=data.get("pdgId"),
                 class_flat=data.get("class"),
-                p_flat=data.get("p"),
             )
             # Everything compute_flat_derived returns is event-level except
-            # ptrel/charge, which are per-particle and handled just below.
+            # charge, which is per-particle and handled just below.
             for key, values in derived.items():
-                if key not in ("ptrel", "charge"):
+                if key != "charge":
                     self._event_data[f"{coll_name}_{key}"] = values
-            data["ptrel"] = derived["ptrel"]
-            # Prefer a stored charge branchonly fall back to the pdgId-derived charge when none was loaded.
+            # Prefer a stored charge branch; only fall back to the pdgId-derived
+            # charge when none was loaded.
             if "charge" in derived and "charge" not in data:
                 data["charge"] = derived["charge"]
 
@@ -490,7 +515,7 @@ class EagerDataset(PhysicsDatasetBase):
         dict[str, Tensor],
         Tensor | None,
     ]:
-        """Extract one event, sort by ptrel desc, pad to max_particles."""
+        """Extract one event, sort by p descending, pad to max_particles."""
         assert isinstance(idx, int), "EagerDataset only supports int indexing"
 
         collection_data: dict[str, dict[str, Tensor]] = {}
@@ -501,8 +526,8 @@ class EagerDataset(PhysicsDatasetBase):
             start, end = info.cumsum[idx], info.cumsum[idx + 1]  # type: ignore
             n = info.n_particles[idx]  # type: ignore
 
-            # Sort by ptrel descending
-            sort_idx = np.argsort(data_dict["ptrel"][start:end])[::-1]
+            # Sort by p descending
+            sort_idx = np.argsort(data_dict["p"][start:end])[::-1]
 
             coll: dict[str, Tensor] = {}
             for var, arr in data_dict.items():

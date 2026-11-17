@@ -1,8 +1,8 @@
 """Runtime computation of derived physics variables.
 
-All derived quantities (ptrel, charge, impact parameters, etc.) are computed
-at runtime rather than being pre-stored. This ensures consistency across
-ROOT and HDF5 backends.
+All derived quantities (event sums, species counts, charge, impact parameters,
+etc.) are computed at runtime rather than being pre-stored. This ensures
+consistency across the file backends.
 """
 
 import numpy as np
@@ -148,7 +148,7 @@ class ComputedVariables:
     Supports:
     - d0Sig, z0Sig: Impact parameter significance (IP / error)
     - means: Per-event mean of context variables
-    - ht, met_x, met_y, ptrel, charge: Event/particle-level aggregates
+    - ht_p, charge: Per-event scalar momentum sum; per-particle charge
     - Ng, Nn: Per-event photon / neutron multiplicity, from pdgId
     - Pxh, Pyh: Per-event hadronic (non-electron) px / py sum, from pdgId
     - PV coordinates, vz_shifted, d0My/z0My: From vertex positions
@@ -235,65 +235,39 @@ class ComputedVariables:
 
     @staticmethod
     def compute_flat_derived(
-        pt_flat: np.ndarray,
+        p_flat: np.ndarray,
+        theta_flat: np.ndarray,
         phi_flat: np.ndarray,
         n_particles: np.ndarray,
         cumsum: np.ndarray,
         pdgId_flat: np.ndarray | None = None,
         class_flat: np.ndarray | None = None,
-        p_flat: np.ndarray | None = None,
     ) -> dict[str, np.ndarray]:
-        """Compute ht, met_x, met_y, ptrel, charge from flat concatenated arrays.
+        """Compute the derived event variables and charge from flat arrays.
 
-        Uses ``np.add.reduceat`` for efficient per-event aggregation — no Python
-        per-event loop.
+        Uses segment sums for per-event aggregation — no Python per-event loop.
 
         Args:
-            pt_flat: Flat concatenated pt array for all events.
-            phi_flat: Flat concatenated phi array.
+            p_flat: Flat concatenated momentum magnitude for all events.
+            theta_flat: Flat concatenated polar angle (rad).
+            phi_flat: Flat concatenated azimuthal angle (rad).
             n_particles: Per-event particle counts, shape ``(n_events,)``.
             cumsum: Cumulative sum array, shape ``(n_events + 1,)``.
             pdgId_flat: Flat concatenated pdgId (optional, for charge and the
                 species-based event variables).
             class_flat: Flat concatenated class (optional, for charge).
-            p_flat: Flat concatenated momentum magnitude (optional). When
-                given, ``ht_p``, the p analogue of ht (event-level scalar sum
-                of p), is added.
 
         Returns:
-            Dict with keys ``ht``, ``met_x``, ``met_y`` (event-level,
-            shape ``(n_events,)``), ``ptrel`` (particle-level, same
-            length as ``pt_flat``), and optionally ``charge``.  When
-            ``pdgId_flat`` is supplied, the event-level species counts
-            (``Ng``, ``Nn`` — see ``SPECIES_COUNTS``) and hadronic momentum
-            sums (``Pxh``, ``Pyh``) are added.
+            Dict with the event-level ``ht_p`` (scalar sum of p, shape
+            ``(n_events,)``) and optionally the per-particle ``charge``. When
+            ``pdgId_flat`` is supplied, the event-level species counts (``Ng``,
+            ``Nn`` — see ``SPECIES_COUNTS``) and hadronic momentum sums
+            (``Pxh``, ``Pyh``) are added.
         """
-        n_events = len(n_particles)
-
-        # Event-level aggregates; segment_sum yields 0.0 for empty events.
-        ht = segment_sum(pt_flat, n_particles, cumsum)
-        met_x = segment_sum(pt_flat * np.cos(phi_flat), n_particles, cumsum)
-        met_y = segment_sum(pt_flat * np.sin(phi_flat), n_particles, cumsum)
-
-        # ptrel: broadcast event-level ht to particle level
-        event_idx = np.repeat(np.arange(n_events), n_particles)
-        ht_per_particle = ht[event_idx]
-        ptrel = np.divide(
-            pt_flat,
-            ht_per_particle,
-            out=np.zeros_like(pt_flat, dtype=np.float32),
-            where=ht_per_particle > 0,
-        )
-
+        # segment_sum yields 0.0 for empty events.
         result: dict[str, np.ndarray] = {
-            "ht": ht,
-            "met_x": met_x,
-            "met_y": met_y,
-            "ptrel": ptrel,
+            "ht_p": segment_sum(p_flat, n_particles, cumsum),
         }
-
-        if p_flat is not None:
-            result["ht_p"] = segment_sum(p_flat, n_particles, cumsum)
 
         if pdgId_flat is not None:
             result.update(
@@ -301,7 +275,7 @@ class ComputedVariables:
             )
             result.update(
                 ComputedVariables.compute_flat_hadronic_missing_p(
-                    pdgId_flat, pt_flat, phi_flat, n_particles, cumsum
+                    pdgId_flat, p_flat, theta_flat, phi_flat, n_particles, cumsum
                 )
             )
 
@@ -342,21 +316,24 @@ class ComputedVariables:
     @staticmethod
     def compute_flat_hadronic_missing_p(
         pdgid_flat: np.ndarray,
-        pt_flat: np.ndarray,
+        p_flat: np.ndarray,
+        theta_flat: np.ndarray,
         phi_flat: np.ndarray,
         n_particles: np.ndarray,
         cumsum: np.ndarray,
     ) -> dict[str, np.ndarray]:
         """Per-event transverse momentum sum of the hadronic system.
 
-        The vector sum of px/py over every particle that is not an electron
-        (``pdgId == 11``); positrons are kept.  This is the visible hadronic
-        momentum, not its negative (the "missing" momentum).
+        The vector sum of ``px = p sin(theta) cos(phi)`` and
+        ``py = p sin(theta) sin(phi)`` over every particle that is not an
+        electron (``pdgId == 11``); positrons are kept.  This is the visible
+        hadronic momentum, not its negative (the "missing" momentum).
 
         Args:
             pdgid_flat: Flat concatenated pdgId array.
-            pt_flat: Flat concatenated pt array.
-            phi_flat: Flat concatenated phi array.
+            p_flat: Flat concatenated momentum magnitude.
+            theta_flat: Flat concatenated polar angle (rad).
+            phi_flat: Flat concatenated azimuthal angle (rad).
             n_particles: Per-event particle counts, shape ``(n_events,)``.
             cumsum: Cumulative sum array, shape ``(n_events + 1,)``.
 
@@ -368,8 +345,9 @@ class ComputedVariables:
         # Zero electrons rather than dropping them, so the arrays stay aligned
         # with the per-event cumsum offsets.
         is_hadron = pdgid_flat != ELECTRON_PDGID
-        px = np.where(is_hadron, pt_flat * np.cos(phi_flat), 0.0)
-        py = np.where(is_hadron, pt_flat * np.sin(phi_flat), 0.0)
+        sin_theta = np.sin(theta_flat)
+        px = np.where(is_hadron, p_flat * sin_theta * np.cos(phi_flat), 0.0)
+        py = np.where(is_hadron, p_flat * sin_theta * np.sin(phi_flat), 0.0)
         return {
             "Pxh": segment_sum(px, n_particles, cumsum),
             "Pyh": segment_sum(py, n_particles, cumsum),

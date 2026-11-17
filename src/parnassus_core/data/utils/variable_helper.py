@@ -43,9 +43,9 @@ class VariableHelper:
 
     Examples:
         >>> vh = VariableHelper(["truth", "pflow"])
-        >>> vh.get_collection("truth_pt")
+        >>> vh.get_collection("truth_p")
         'truth'
-        >>> vh.get_collection("ht")  # No prefix → None
+        >>> vh.get_collection("ht_p")  # No prefix → None
         >>> vh.get_base_name("pflow_d0My")
         'd0My'
         >>> vh.scaler_key("pflow_d0My")
@@ -60,7 +60,7 @@ class VariableHelper:
         """Extract collection name from variable.
 
         Args:
-            var_name: Variable name, e.g. ``'truth_pt'``, ``'pflow_d0My'``
+            var_name: Variable name, e.g. ``'truth_p'``, ``'pflow_d0My'``
 
         Returns:
             Collection name (``'truth'``, ``'pflow'``, etc.) or ``None``
@@ -68,11 +68,11 @@ class VariableHelper:
 
         Examples:
             >>> vh = VariableHelper(["truth", "pflow"])
-            >>> vh.get_collection("truth_pt")
+            >>> vh.get_collection("truth_p")
             'truth'
             >>> vh.get_collection("pflow_d0My")
             'pflow'
-            >>> vh.get_collection("ht")
+            >>> vh.get_collection("ht_p")
             None
         """
         for name, prefix in self._prefixes.items():
@@ -91,12 +91,12 @@ class VariableHelper:
 
         Examples:
             >>> vh = VariableHelper(["truth", "pflow"])
-            >>> vh.get_base_name("truth_pt")
-            'pt'
+            >>> vh.get_base_name("truth_p")
+            'p'
             >>> vh.get_base_name("pflow_d0My")
             'd0My'
-            >>> vh.get_base_name("ht")
-            'ht'
+            >>> vh.get_base_name("ht_p")
+            'ht_p'
         """
         for prefix in self._prefixes.values():
             if var_name.startswith(prefix):
@@ -123,8 +123,8 @@ class VariableHelper:
 
         Examples:
             >>> vh = VariableHelper(["truth", "pflow"])
-            >>> vh.scaler_key("truth_pt")
-            'pt'
+            >>> vh.scaler_key("truth_p")
+            'p'
             >>> vh.scaler_key("pflow_d0My")
             'd0'
             >>> vh.scaler_key("npflow")

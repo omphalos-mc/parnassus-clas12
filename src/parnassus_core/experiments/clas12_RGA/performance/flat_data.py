@@ -48,8 +48,7 @@ from parnassus_core.performance.performance import (
 # px/py/pz/E and a per-event hung_cost_all that nothing downstream consumes -- on the
 # union file that is ~590 MB compressed the shared loader reads and then discards.
 PARTICLE_FIELDS = (
-    "pt",
-    "p",  # files carry p or pt; from_flat derives whichever is missing
+    "p",
     "eta",  # absent on CLAS12 (theta is the variable of record); kept for other files
     "theta",
     "phi",
@@ -70,7 +69,7 @@ MATCH_FIELDS = ("tr_idx_all", "pf_idx_all")
 
 # Residual variables, in the order calc_particle_residuals uses. Whichever of
 # eta/theta (or vx/vy/beta) the file does not carry is dropped.
-RESIDUAL_VARS = ("pt", "p", "eta", "theta", "phi", "vx", "vy", "vz", "beta")
+RESIDUAL_VARS = ("p", "eta", "theta", "phi", "vx", "vy", "vz", "beta")
 
 COLLECTIONS = ("pflow", "truth", "fastsim")
 
@@ -264,14 +263,12 @@ class Clas12FlatData(Data):
             for var in PARTICLE_FIELDS
             if var in collection_data
         }
-        # Event aggregates need pt and the CLAS12 plots need p, but a file carries only
-        # one of them (theta in radians), so derive the other as postprocess_eval does.
-        if "theta" in particle_data:
-            sin_theta = np.sin(np.asarray(particle_data["theta"], dtype=np.float64))
-            if "pt" not in particle_data and "p" in particle_data:
-                particle_data["pt"] = particle_data["p"] * sin_theta
-            elif "p" not in particle_data and "pt" in particle_data:
-                particle_data["p"] = particle_data["pt"] / sin_theta
+        missing = {"p", "theta", "phi"} - particle_data.keys()
+        if missing:
+            raise KeyError(
+                f"{label or name}: the CLAS12 plots need the per-particle "
+                f"{sorted(missing)} branches."
+            )
         event_data = {
             var: collection_data[f"evt_{var}"]
             for var in DIS_VARS
@@ -316,9 +313,9 @@ class Clas12FlatData(Data):
         """Flat positions of the matched ``(self, other)`` particle pairs.
 
         Turns the stored per-event local indices into positions in the flat arrays by
-        adding each side's event offset. Also applies the shared code's
-        ``len(indices[i]) > len(data["pt"][i])`` sanity guard, vectorized to a per-event
-        mask (it drops nothing on the current files, but keeps parity).
+        adding each side's event offset. Also applies the shared code's sanity guard
+        (no more matches than particles in an event), vectorized to a per-event mask (it
+        drops nothing on the current files, but keeps parity).
         """
         keep_event = self.match_counts <= self.part_counts
         match_event = np.repeat(np.arange(self.num_events), self.match_counts)
@@ -377,23 +374,19 @@ class Clas12FlatData(Data):
         self.event_data["njet"] = np.zeros(len(counts), dtype=int)
         self.event_data["npart"] = counts.astype(int)
 
-        pt = np.asarray(self.particle_data_all["pt"], dtype=np.float64)
+        # The event variables the event model is trained on: the scalar sum of p,
+        # and the hadronic (non-electron) px/py sums, via the same function
+        # training uses.
+        p = np.asarray(self.particle_data_all["p"], dtype=np.float64)
+        theta = np.asarray(self.particle_data_all["theta"], dtype=np.float64)
         phi = np.asarray(self.particle_data_all["phi"], dtype=np.float64)
-        self.event_data["met_x"] = _segment_sum(pt * np.cos(phi), counts, offsets)
-        self.event_data["met_y"] = _segment_sum(pt * np.sin(phi), counts, offsets)
-        self.event_data["ht"] = _segment_sum(pt, counts, offsets)
-
-        # p analogues the event model is trained on: the scalar sum of p, and the
-        # hadronic (non-electron) px/py sums, via the same function training uses.
-        if "p" in self.particle_data_all:
-            p = np.asarray(self.particle_data_all["p"], dtype=np.float64)
-            self.event_data["ht_p"] = _segment_sum(p, counts, offsets)
+        self.event_data["ht_p"] = _segment_sum(p, counts, offsets)
         if "pdgId" in self.particle_data_all:
             # Fastsim and truth store pdgId as float.
             pdgid = np.rint(self.particle_data_all["pdgId"]).astype(int)
             self.event_data.update(
                 ComputedVariables.compute_flat_hadronic_missing_p(
-                    pdgid, pt, phi, counts, offsets
+                    pdgid, p, theta, phi, counts, offsets
                 )
             )
 

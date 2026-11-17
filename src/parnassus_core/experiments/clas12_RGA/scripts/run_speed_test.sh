@@ -25,18 +25,17 @@
 # below), e.g.
 #   -bs N              Generation batch size (default 4096, as in the eval chain).
 #   --num-workers N    DataLoader workers (default 8 here; 0 = in-process).
-#   -ne N              Events to generate (default 500000, from the config).
+#   -ne N              Classifier-kept events to load (default 500000, from the config).
 #   --skip-write       Skip the final eval ROOT write.
-#   --keep-outputs     Keep the transient filtered/eval ROOT files in $SCRATCH.
+#   --keep-outputs     Keep the transient eval ROOT file in $SCRATCH.
 # See `python -m parnassus_core.experiments.clas12_RGA.evaluation.speed_test -h`.
 
 set -eo pipefail
 
 # Submit from the repository root with the parnassus-core environment active;
-# sbatch passes that environment on to the job. DATA is the directory holding
-# v8/v8_test.root, i.e. data.top_folder of EVAL_CONFIG.
+# sbatch passes that environment on to the job. The input (v8/v8_test.root) and
+# the scatE filter settings come from the eval config.
 REPO_ROOT="${REPO_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
-: "${DATA:?export DATA=<directory holding v8/v8_test.root>}"
 
 # FlowLightning checkpoints are loaded with weights_only=False.
 export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1
@@ -47,6 +46,5 @@ mkdir -p "${REPO_ROOT}/logs/slurm"
 
 python -m parnassus_core.experiments.clas12_RGA.evaluation.speed_test \
     -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/config.yaml \
-    --filter-input "${DATA}/v8/v8_test.root" \
     --num-workers 8 \
     "$@"

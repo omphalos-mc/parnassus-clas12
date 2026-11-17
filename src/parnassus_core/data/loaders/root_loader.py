@@ -11,13 +11,13 @@ Never use ``tree[branch].array()`` one branch at a time.
 Usage::
 
     loader = ROOTFileLoader("data.root", tree_name="evt_tree", num_workers=6)
-    truth = loader.load_particle_collection("truth", ["pt", "eta"], 0, 100)
+    truth = loader.load_particle_collection("truth", ["p", "theta"], 0, 100)
     events = loader.load_event_variables(["eventNumber", "ntruth"], 0, 100)
     loader.close()
 
     # Or: bulk load everything at once
     all_data = loader.load_branches(
-        ["truth_pt", "truth_eta", "pflow_pt", "ntruth", "eventNumber"],
+        ["truth_p", "truth_theta", "pflow_p", "ntruth", "eventNumber"],
         entry_start=0, entry_stop=100,
     )
 """
@@ -38,7 +38,7 @@ class ROOTFileLoader(FileLoader):
     The ROOT file is expected to have a flat TTree where:
 
     - Particle-level branches are named ``{collection}_{variable}``
-      (e.g., ``truth_pt``, ``pflow_d0Error``) and contain ragged arrays.
+      (e.g., ``truth_p``, ``pflow_d0Error``) and contain ragged arrays.
     - Particle counts are in ``n{collection}`` branches
       (e.g., ``ntruth``, ``npflow``).
     - Event-level branches are scalars (e.g., ``eventNumber``).
@@ -87,7 +87,7 @@ class ROOTFileLoader(FileLoader):
         ----------
         branch_names : list[str]
             Branch names exactly as they appear in the TTree
-            (e.g., ``["truth_pt", "ntruth", "eventNumber"]``).
+            (e.g., ``["truth_p", "ntruth", "eventNumber"]``).
         entry_start, entry_stop : int
             Event range ``[entry_start, entry_stop)``.
 
@@ -110,7 +110,7 @@ class ROOTFileLoader(FileLoader):
         self,
         branch_names: list[str],
         entry_start: int,
-        entry_stop: int,
+        entry_stop: int | None,
         step_size: int,
     ) -> Iterator[dict[str, np.ndarray]]:
         """Bulk-read ``branch_names`` in consecutive chunks of events.
@@ -124,8 +124,10 @@ class ROOTFileLoader(FileLoader):
         ----------
         branch_names : list[str]
             Branch names exactly as they appear in the TTree.
-        entry_start, entry_stop : int
-            Event range ``[entry_start, entry_stop)``.
+        entry_start : int
+            First event.
+        entry_stop : int or None
+            One past the last event; ``None`` reads to the end of the tree.
         step_size : int
             Number of events per chunk.
 
@@ -134,6 +136,8 @@ class ROOTFileLoader(FileLoader):
         dict[str, np.ndarray]
             ``{branch_name: array}`` for one chunk of events.
         """
+        if entry_stop is None:
+            entry_stop = self._tree.num_entries
         if not branch_names or entry_stop <= entry_start:
             return
         yield from self._tree.iterate(
@@ -143,6 +147,10 @@ class ROOTFileLoader(FileLoader):
             entry_stop=entry_stop,
             step_size=step_size,
         )
+
+    def has_branch(self, name: str) -> bool:
+        """Whether the TTree has a branch called ``name``."""
+        return name in self._tree.keys()
 
     # ------------------------------------------------------------------
     # FileLoader interface (convenience wrappers around load_branches)
@@ -166,7 +174,7 @@ class ROOTFileLoader(FileLoader):
         collection_name : str
             E.g. ``"truth"``, ``"pflow"``.
         variables : list[str]
-            Bare variable names (``"pt"``, ``"eta"``).
+            Bare variable names (``"p"``, ``"theta"``).
         entry_start, entry_stop : int
             Event range ``[entry_start, entry_stop)``.
 

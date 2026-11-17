@@ -132,10 +132,10 @@ def apply_batch_transform(
         List of transformed tensors (to be concatenated by caller)
 
     Example:
-        >>> var_names = ["truth_pt", "truth_eta", "truth_phi"]
+        >>> var_names = ["truth_p", "truth_theta", "truth_phi"]
         >>> data_dict = {
-        ...     "truth_pt": torch.tensor([[10.0]]),
-        ...     "truth_eta": torch.tensor([[1.5]]),
+        ...     "truth_p": torch.tensor([[10.0]]),
+        ...     "truth_theta": torch.tensor([[0.3]]),
         ...     "truth_phi": torch.tensor([[2.0]]),
         ... }
         >>> result = apply_batch_transform(var_names, data_dict, True, scaler)

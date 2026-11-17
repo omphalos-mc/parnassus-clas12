@@ -1,16 +1,20 @@
-# Full-chain evaluation (event model -> particle model) on a classifier-filtered
-# CLAS12 sample. The scatE classifier supplies the scattered-electron reconstruction
-# efficiency: scatE_filter keeps each event of v8_test.root with the classifier's
-# probability and writes the fast-sim input read below. For the paper run:
+# Full-chain evaluation (event model -> particle model) of the CLAS12 test sample.
+# The scatE classifier supplies the scattered-electron reconstruction efficiency:
+# the scatE_filter block below keeps each event of v8_test.root with the
+# classifier's probability while the dataset is read, and n_events counts the
+# kept (evaluated) events. For the paper run:
+#
+#   python -m parnassus_core.evaluation.eval \
+#       -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/config.yaml
+#
+# The full-sim reference for postprocess_eval's -d (postprocess_union.yaml) keeps
+# the events with pflow_scatE == 1:
 #
 #   python -m parnassus_core.experiments.clas12_RGA.evaluation.scatE_filter \
 #       -i <parnassus_data>/v8/v8_test.root \
-#       -o <parnassus_data>/v8/v8_test_filtered.root \
-#       --mode sample --seed 0
+#       -o <parnassus_data>/v8/v8_test_filtered_truth.root
 #
-# The same command with `--mode truth` and -o v8_test_filtered_truth.root builds the
-# full-sim reference for postprocess_eval's -d (postprocess_union.yaml); see the
-# evaluation section of the experiment README.
+# See the evaluation section of the experiment README.
 
 eval_path: clasdis_filtered
 recalculate_ip: False
@@ -30,13 +34,17 @@ particle_model:
   sampler_type: "dpm"
   n_steps: 40
 
+scatE_filter:
+  ckpt_path: src/parnassus_core/experiments/clas12_RGA/pre-trained-models/pre-filter_model.ckpt
+  mode: sample
+  seed: 0
 
 data:
-  top_folder: /global/cfs/cdirs/m3246/tjhellst/parnassus_data
+  top_folder: /path/to/root_files
   max_particles: 53
   eta_clamp: [-3.0, 5.0]
   class_based_scaling: true
   datasets:
     - name: clasdis_filtered
-      path: v8/v8_test_filtered.root
+      path: v8/v8_test.root
       n_events: 500_000
