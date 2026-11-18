@@ -170,3 +170,4 @@ logs_perlmutter/*
 # Local evaluation outputs and editor backups
 clasdis_*/
 *~
+plots/*
