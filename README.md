@@ -3,7 +3,7 @@
 Parnassus is a particle-level fast simulation based on flow matching. This repository applies it
 to the CLAS12 detector at Jefferson Lab, Hall B, for the RG-A Fall 2018 inbending configuration:
 a 10.6041 GeV electron beam on a proton target, trained on `clasdis` deep-inelastic-scattering
-Monte Carlo. It holds the code for "TODO: paper title" (arXiv: TODO).
+Monte Carlo. It holds the code for "An AI-based Detector Simulation and Reconstruction Model for the CLAS12 Detector at JLab" (arXiv: TODO).
 
 **Start with the [CLAS12 README](src/parnassus_core/experiments/clas12_RGA/README.md)**. It
 covers the generation chain, the data, training, evaluation and the paper figures. The rest of
@@ -34,8 +34,6 @@ particles, computes the DIS kinematics and joins the fast-sim output with the fu
   `paper-v1` goes with the paper.
 - **Trained checkpoints** of the paper models are in
   [`clas12_RGA/pre-trained-models/`](src/parnassus_core/experiments/clas12_RGA/pre-trained-models/README.md).
-- **The postprocessed MC evaluation output** is on Zenodo (DOI: TODO). Real CLAS12 RG-A data
-  are not distributed.
 
 ## Installation
 
@@ -47,27 +45,42 @@ cd parnassus-clas12
 pip install -e . "jsonargparse[signatures]>=4.27.7"
 ```
 
-## Quick start
+This will cover all of the requirements, except the specific flash attention module, which needs to be built from your specific python, torch, and cuda version, as well as the CPU architecture used by your machine. After finding thes numbers, choose the pre-built wheel from this repository using the useful search feature:
 
-Run from the repository root. The data and checkpoint paths in the configs are site-specific;
-the CLAS12 README says which ones to edit.
+https://github.com/mjun0812/flash-attention-prebuild-wheels/
+
+and install with 
 
 ```bash
-# train the event and particle models
-python -m parnassus_core.experiments.clas12_RGA.main fit \
-    -c src/parnassus_core/experiments/clas12_RGA/configs/event.yaml
-python -m parnassus_core.experiments.clas12_RGA.main fit \
-    -c src/parnassus_core/experiments/clas12_RGA/configs/particle.yaml
-
-# full chain on a 500k-event sample: pre-filter -> generation -> postprocessing
-export DATA=<directory holding v8/v8_test.root>
-sbatch -A <account> src/parnassus_core/experiments/clas12_RGA/scripts/run_evaluation_chain.sh
+pip install <link_to_pre-build-wheel_with_python_torch_and_cuda_versions>
 ```
 
-The [job scripts README](src/parnassus_core/experiments/clas12_RGA/scripts/README.md) gives the
-exact commands of the paper run, and the notebooks in
-[`clas12_RGA/notebooks/`](src/parnassus_core/experiments/clas12_RGA/notebooks) make the paper
-figures from its output.
+For convenience, run these commands in your environment to determine the relevant numbers for you.
+```bash
+uname -m
+python --version
+python -c "import torch; print('Torch version: ',torch.__version__); print('CUDA version: ',torch.version.cuda)"
+```
+
+### Installation on ifarm computing cluster
+
+After cloning the repository, create an environment for the requirements. You may need to unset the PYTHONPATH environment variable to avoid attempting to install or uninstall from the CVMFS directory. 
+For example:
+```bash
+conda create -n parnassus-env python=3.11
+conda activate parnassus-env
+conda env config vars set -n parnassus-env PYTHONPATH=""
+pip install -e . "jsonargparse[signatures]>=4.27.7"
+```
+
+Then the pre-built wheel needed for ifarm at the time of this publication is the Linux x86_64, python 3.11, torch 2.9.1, CUDA 12.8 flash attention module. This can be installed with the following pip command:
+```bash
+pip install https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.9-cp311-cp311-linux_x86_64.whl
+```
+
+## Quick start
+
+Go to the CLAS12 README at src/parnassus_core/experiments/clas12_RGA/README.md for instructions on how to specify the input data set and run evaluation and/or training.
 
 ## The core library
 
@@ -89,14 +102,6 @@ the ROOT trees through `ParnassusDataModule`. The [data guide](src/parnassus_cor
 the [evaluation guide](src/parnassus_core/evaluation/README.md) and the
 [scaling guide](src/parnassus_core/preprocessing/scaling/README.md) describe the configuration
 options.
-
-## Other experiments
-
-The core library also includes the CMS 2011 and CMS 2012 experiments, which are not part of the
-CLAS12 work. They add an impact-parameter model and their own preprocessing pipeline; see the
-[CMS 2011](src/parnassus_core/experiments/cms_2011/README.md) and
-[CMS 2012](src/parnassus_core/experiments/cms_2012/README.md) READMEs and the
-[preprocessing guide](src/parnassus_core/preprocessing/README.md).
 
 ## Development
 

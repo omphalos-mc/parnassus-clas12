@@ -19,11 +19,10 @@ data:
   entry_start_valid: 40_000_000
   entry_start_test: 0
 
-  # Site-specific: point these at your copy of the CLAS12 samples. The stage configs
-  # (configs/event.yaml, configs/particle.yaml) override train_path and valid_path.
-  train_path: "/global/cfs/cdirs/m3246/tjhellst/parnassus_data/v8/v8_train.root"
-  valid_path: "/global/cfs/cdirs/m3246/tjhellst/parnassus_data/v8/v8_train.root"
-  test_path: "/global/cfs/cdirs/m3246/tjhellst/parnassus_data/v8/v8_test_filtered_truth.root"
+  # Site-specific: point these at your data location
+  train_path: "<path_to_training_data>"
+  valid_path: "<path_to_validation_data>"
+  test_path: "<path_to_test_data>"
 
 # Training stuff here
 trainer:

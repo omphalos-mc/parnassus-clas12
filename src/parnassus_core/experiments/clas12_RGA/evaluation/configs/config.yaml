@@ -1,20 +1,6 @@
 # Full-chain evaluation (event model -> particle model) of the CLAS12 test sample.
-# The scatE classifier supplies the scattered-electron reconstruction efficiency:
-# the scatE_filter block below keeps each event of v8_test.root with the
-# classifier's probability while the dataset is read, and n_events counts the
-# kept (evaluated) events. For the paper run:
-#
-#   python -m parnassus_core.evaluation.eval \
-#       -c src/parnassus_core/experiments/clas12_RGA/evaluation/configs/config.yaml
-#
-# The full-sim reference for postprocess_eval's -d (postprocess_union.yaml) keeps
-# the events with pflow_scatE == 1:
-#
-#   python -m parnassus_core.experiments.clas12_RGA.evaluation.scatE_filter \
-#       -i <parnassus_data>/v8/v8_test.root \
-#       -o <parnassus_data>/v8/v8_test_filtered_truth.root
-#
-# See the evaluation section of the experiment README.
+#replace the paths in the data: section of the config to point to your desired input files.
+# Root input paths must specify a single file. LUND input files may include directories or glob specifications
 
 eval_path: clasdis_filtered
 recalculate_ip: False
@@ -40,11 +26,11 @@ scatE_filter:
   seed: 0
 
 data:
-  top_folder: /path/to/root_files
+  top_folder: /w/hallb-scshelf2102/clas12/users/tjhellst/mcdj/eventfiles/
   max_particles: 53
   eta_clamp: [-3.0, 5.0]
   class_based_scaling: true
   datasets:
     - name: clasdis_filtered
-      path: v8/v8_test.root
-      n_events: 500_000
+      path: "*.dat"
+      n_events: 100_000
